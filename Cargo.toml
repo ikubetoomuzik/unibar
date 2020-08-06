@@ -1,0 +1,10 @@
+[package]
+name = "unibar"
+version = "0.1.0"
+authors = ["Curtis Jones <ikubetoomuzik@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+x11 = "2.18.2"
