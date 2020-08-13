@@ -8,3 +8,4 @@ edition = "2018"
 
 [dependencies]
 x11 = "2.18.2"
+x11-dl = "2.18.5"
