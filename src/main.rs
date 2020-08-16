@@ -2,11 +2,16 @@
 // By: Curtis Jones
 // Started on Ausust 06, 2020
 
-use std::{ffi::CString, mem, os::raw::*, process, ptr};
+use std::{ffi::CString, mem, os::raw::*, process, ptr, thread, time};
 
 use x11_dl::{xft, xlib};
 
 use libc;
+
+fn wait(time_ms: u64) {
+    let time = time::Duration::from_millis(time_ms);
+    thread::sleep(time);
+}
 
 unsafe fn get_atom(xlib: &xlib::Xlib, dpy: *mut xlib::Display, name: &str) -> xlib::Atom {
     (xlib.XInternAtom)(
@@ -127,6 +132,20 @@ unsafe fn set_atoms(xlib: &xlib::Xlib, dpy: *mut xlib::Display, window: c_ulong)
     );
 }
 
+unsafe fn poll_events(
+    xlib: &xlib::Xlib,
+    dpy: *mut xlib::Display,
+    window: c_ulong,
+    event_mask: c_long,
+    return_event: &mut xlib::XEvent,
+) -> bool {
+    if (xlib.XCheckWindowEvent)(dpy, window, event_mask, return_event) == 1 {
+        return true;
+    } else {
+        return false;
+    }
+}
+
 unsafe fn get_color(
     xlib: &xlib::Xlib,
     dpy: *mut xlib::Display,
@@ -196,7 +215,7 @@ fn main() {
         let font = (xft.XftFontOpenName)(
             dpy,
             screen,
-            CString::new("Hack:size=12:antialias=true")
+            CString::new("Unifont:size=12:antialias=true")
                 .unwrap()
                 .as_ptr() as *const c_char,
         );
@@ -207,24 +226,62 @@ fn main() {
 
         // Init variables for event loop.
         let mut event: xlib::XEvent = mem::MaybeUninit::uninit().assume_init();
+        let test_str = CString::new("🔉").unwrap();
+        let mut test_font_colour: xft::XftColor = mem::MaybeUninit::uninit().assume_init();
+        (xft.XftColorAllocName)(
+            dpy,
+            visual,
+            cmap,
+            CString::new("#FF79C6").unwrap().as_ptr() as *const c_char,
+            &mut test_font_colour,
+        );
+        let test_font = (xft.XftFontOpenName)(
+            dpy,
+            screen,
+            CString::new("Unifont Upper:size=16:antialias=true")
+                .unwrap()
+                .as_ptr() as *const c_char,
+        );
 
         // Event loop previously mentioned.
         loop {
-            (xlib.XNextEvent)(dpy, &mut event);
-
-            match event.get_type() {
-                xlib::Expose => (xft.XftDrawString8)(
-                    draw,                                                             // Draw item to display on.
-                    &font_colour, // XftColor to use.
-                    font,         // XftFont to use.
-                    50,           // X (from top left)
-                    22,           // Y (from top left)
-                    CString::new("Hello world!").unwrap().as_ptr() as *const c_uchar, // String to print.
-                    12, // Length of string.
-                ),
-                xlib::ButtonPress => break,
-                _ => {}
+            if poll_events(
+                &xlib,
+                dpy,
+                window,
+                xlib::ExposureMask | xlib::ButtonPressMask,
+                &mut event,
+            ) {
+                match event.get_type() {
+                    xlib::Expose => {
+                        // We can draw unicode symbols woooooo. This was totally worth all this
+                        // work... right?
+                        (xft.XftDrawStringUtf8)(
+                            draw,                                // Draw item to display on.
+                            &test_font_colour,                   // XftColor to use.
+                            test_font,                           // XftFont to use.
+                            50,                                  // X (from top left)
+                            24,                                  // Y (from top left)
+                            test_str.as_ptr() as *const c_uchar, // String to print.
+                            test_str.as_bytes().len() as c_int,  // Length of string.
+                        );
+                        (xft.XftDrawStringUtf8)(
+                            draw,                                                             // Draw item to display on.
+                            &font_colour, // XftColor to use.
+                            font,         // XftFont to use.
+                            70,           // X (from top left)
+                            22,           // Y (from top left)
+                            CString::new("Hello world!").unwrap().as_ptr() as *const c_uchar, // String to print.
+                            12, // Length of string.
+                        );
+                    }
+                    xlib::ButtonPress => break,
+                    _ => {}
+                }
+            } else {
+                println!("No events.");
             }
+            wait(500);
         }
 
         (xft.XftColorFree)(dpy, visual, cmap, &mut font_colour);
