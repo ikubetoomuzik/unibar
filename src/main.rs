@@ -2,9 +2,9 @@
 // By: Curtis Jones
 // Started on Ausust 06, 2020
 
-use std::{ffi::CString, mem, os::raw::*, process, ptr, thread, time};
+use std::{ffi::CString, io::stdin, mem, os::raw::*, process, ptr, sync::mpsc, thread, time};
 
-use x11_dl::{xft, xlib};
+use x11_dl::{xft, xlib, xrender::XGlyphInfo};
 
 use libc;
 
@@ -38,11 +38,11 @@ unsafe fn set_atoms(xlib: &xlib::Xlib, dpy: *mut xlib::Display, window: c_ulong)
 
     // Set WM_CLIENT_MACHINE
     let hn_size = libc::sysconf(libc::_SC_HOST_NAME_MAX) as libc::size_t;
-    let mut hn_buffer = vec![0 as c_char; hn_size];
-    libc::gethostname(hn_buffer.as_mut_ptr() as *mut c_char, hn_size);
-    let hn_list: *mut *mut c_char = [hn_buffer.as_mut_ptr()].as_mut_ptr();
+    let hn_buffer: *mut c_char = vec![0 as c_char; hn_size].as_mut_ptr();
+    libc::gethostname(hn_buffer, hn_size);
+    let mut hn_list = [hn_buffer];
     let mut hn_text_prop: xlib::XTextProperty = mem::MaybeUninit::uninit().assume_init();
-    (xlib.XStringListToTextProperty)(hn_list, 1, &mut hn_text_prop);
+    (xlib.XStringListToTextProperty)(hn_list.as_mut_ptr(), 1, &mut hn_text_prop);
     (xlib.XSetWMClientMachine)(dpy, window, &mut hn_text_prop);
 
     // Set _NET_WM_PID
@@ -159,11 +159,117 @@ unsafe fn get_color(
     temp.pixel
 }
 
+unsafe fn string_to_fonts_vec(
+    xft: &xft::Xft,
+    dpy: *mut xlib::Display,
+    fonts: [Option<*mut xft::XftFont>; 4],
+    string: &str,
+) -> Vec<Option<*mut xft::XftFont>> {
+    string.chars().fold(Vec::new(), |mut acc, ch| {
+        acc.push(
+            *fonts
+                .iter()
+                .find(|f| match f {
+                    Some(f) => (xft.XftCharExists)(dpy, *f, ch as c_uint) == 1,
+                    None => false,
+                })
+                .unwrap(),
+        );
+        acc
+    })
+}
+
+fn fonts_vec_to_write_pairs(
+    fonts: [Option<*mut xft::XftFont>; 4],
+    fonts_vec: Vec<Option<*mut xft::XftFont>>,
+) -> Vec<(usize, usize)> {
+    let mut tmp = Vec::new();
+    let mut tmp_pair: (usize, usize) = (0, 0);
+    fonts_vec.iter().for_each(|fo| {
+        if *fo == None {
+            if tmp_pair.0 == 0 {
+                tmp_pair.1 += 1;
+            } else {
+                tmp.push(tmp_pair);
+                tmp_pair = (0, 1);
+            }
+        } else {
+            let font_idx = fonts.iter().enumerate().find(|f| *(f.1) == *fo).unwrap().0;
+            if tmp_pair.0 == font_idx {
+                tmp_pair.1 += 1;
+            } else {
+                tmp.push(tmp_pair);
+                tmp_pair = (font_idx, 1);
+            }
+        }
+    });
+    tmp.push(tmp_pair);
+    tmp
+}
+
+unsafe fn string_pixel_width(
+    xft: &xft::Xft,
+    dpy: *mut xlib::Display,
+    font: *mut xft::XftFont,
+    string: &str,
+) -> u32 {
+    let mut extents: XGlyphInfo = mem::MaybeUninit::uninit().assume_init();
+    (xft.XftTextExtentsUtf8)(
+        dpy,
+        font,
+        string.as_bytes().as_ptr() as *mut c_uchar,
+        string.as_bytes().len() as c_int,
+        &mut extents,
+    );
+    extents.width as u32
+}
+
+unsafe fn string_draw(
+    xft: &xft::Xft,
+    dpy: *mut xlib::Display,
+    draw: *mut xft::XftDraw,
+    fonts: [Option<*mut xft::XftFont>; 4],
+    colors: &Vec<&xft::XftColor>,
+    string: &str,
+) {
+    let write_pairs = fonts_vec_to_write_pairs(fonts, string_to_fonts_vec(xft, dpy, fonts, string));
+    let mut x_offset = 0;
+    let mut char_offset = 0;
+    println!("{:#?}", write_pairs);
+    for w_p in write_pairs.iter() {
+        let chunk: String = string.chars().skip(char_offset).take(w_p.1).collect();
+        (xft.XftDrawStringUtf8)(
+            draw,                                        // Draw item to display on.
+            colors[w_p.0],                               // XftColor to use.
+            fonts[w_p.0].unwrap(),                       // XftFont to use.
+            50 + x_offset as i32,                        // X (from top left)
+            20,                                          // Y (from top left)
+            chunk.as_bytes().as_ptr() as *const c_uchar, // String to print.
+            chunk.as_bytes().len() as c_int,             // Length of string.
+        );
+        x_offset += string_pixel_width(xft, dpy, fonts[w_p.0].unwrap(), &chunk);
+        char_offset += w_p.1;
+    }
+}
+
+fn poll_stdin(stdin: std::io::Stdin, send: mpsc::Sender<String>) {
+    loop {
+        let mut tmp = String::new();
+        stdin.read_line(&mut tmp).expect("wont fail.");
+        if tmp.is_empty() {
+            return;
+        } else {
+            send.send(tmp.trim().to_owned()).unwrap();
+        }
+    }
+}
+
 fn main() {
     unsafe {
         // Open display connection.
         let xlib = xlib::Xlib::open().unwrap();
         let dpy = (xlib.XOpenDisplay)(ptr::null());
+        let xft = xft::Xft::open().unwrap();
 
         let screen = (xlib.XDefaultScreen)(dpy);
         let root = (xlib.XRootWindow)(dpy, screen);
@@ -203,7 +309,6 @@ fn main() {
         (xlib.XMapWindow)(dpy, window);
 
         // Set up Xft
-        let xft = xft::Xft::open().unwrap();
         let mut font_colour: xft::XftColor = mem::MaybeUninit::uninit().assume_init();
         (xft.XftColorAllocName)(
             dpy,
@@ -215,18 +320,10 @@ fn main() {
         let font = (xft.XftFontOpenName)(
             dpy,
             screen,
-            CString::new("Unifont:size=12:antialias=true")
+            CString::new("Hack:size=12:antialias=true")
                 .unwrap()
                 .as_ptr() as *const c_char,
         );
-        if font.is_null() {
-            println!("NO FONT")
-        }
-        let draw = (xft.XftDrawCreate)(dpy, window, visual, cmap);
-
-        // Init variables for event loop.
-        let mut event: xlib::XEvent = mem::MaybeUninit::uninit().assume_init();
-        let test_str = CString::new("🔉").unwrap();
         let mut test_font_colour: xft::XftColor = mem::MaybeUninit::uninit().assume_init();
         (xft.XftColorAllocName)(
             dpy,
@@ -243,8 +340,37 @@ fn main() {
                 .as_ptr() as *const c_char,
         );
 
+        if font.is_null() || test_font.is_null() {
+            println!("NO FONT")
+        }
+        let draw = (xft.XftDrawCreate)(dpy, window, visual, cmap);
+
+        // Init variables for event loop.
+        let mut event: xlib::XEvent = mem::MaybeUninit::uninit().assume_init();
+
+        // Test func
+        let tmp_fonts = [Some(font), Some(test_font), None, None];
+        let tmp_font_colors = vec![&font_colour, &test_font_colour];
+
+        // StdinLock
+        let lock = stdin();
+        let (tx, rx) = mpsc::channel();
+
+        thread::spawn(move || poll_stdin(lock, tx));
+
         // Event loop previously mentioned.
         loop {
+            // Do we have some input waiting?
+            match rx.try_recv() {
+                Ok(s) => {
+                    println!("{}", s);
+                    (xlib.XClearWindow)(dpy, window);
+                    string_draw(&xft, dpy, draw, tmp_fonts, &tmp_font_colors, &s);
+                }
+                Err(_) => (),
+            }
+
+            // Any events we should care about?
             if poll_events(
                 &xlib,
                 dpy,
@@ -253,34 +379,23 @@ fn main() {
                 &mut event,
             ) {
                 match event.get_type() {
-                    xlib::Expose => {
-                        // We can draw unicode symbols woooooo. This was totally worth all this
-                        // work... right?
-                        (xft.XftDrawStringUtf8)(
-                            draw,                                // Draw item to display on.
-                            &test_font_colour,                   // XftColor to use.
-                            test_font,                           // XftFont to use.
-                            50,                                  // X (from top left)
-                            24,                                  // Y (from top left)
-                            test_str.as_ptr() as *const c_uchar, // String to print.
-                            test_str.as_bytes().len() as c_int,  // Length of string.
-                        );
-                        (xft.XftDrawStringUtf8)(
-                            draw,                                                             // Draw item to display on.
-                            &font_colour, // XftColor to use.
-                            font,         // XftFont to use.
-                            70,           // X (from top left)
-                            22,           // Y (from top left)
-                            CString::new("Hello world!").unwrap().as_ptr() as *const c_uchar, // String to print.
-                            12, // Length of string.
-                        );
-                    }
+                    // We can draw unicode symbols woooooo. This was totally worth all this
+                    // work... right?
+                    xlib::Expose => string_draw(
+                        &xft,
+                        dpy,
+                        draw,
+                        tmp_fonts,
+                        &tmp_font_colors,
+                        "HelloWorld! 🔉🔉 My name is Curtis🔉 and I can change fonts whenever.",
+                    ),
                     xlib::ButtonPress => break,
                     _ => {}
                 }
-            } else {
-                println!("No events.");
             }
+
+            // Trying this wait in the middle to see what happens. In the end the text bit has
+            // gotta be first.
             wait(500);
         }
 
