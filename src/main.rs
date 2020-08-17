@@ -2,7 +2,10 @@
 // By: Curtis Jones
 // Started on Ausust 06, 2020
 
-use std::{ffi::CString, io::stdin, mem, os::raw::*, process, ptr, sync::mpsc, thread, time};
+use std::{
+    collections::HashMap, ffi::CString, io::stdin, mem, os::raw::*, process, ptr, sync::mpsc,
+    thread, time,
+};
 
 use x11_dl::{xft, xlib, xrender::XGlyphInfo};
 
@@ -229,7 +232,7 @@ unsafe fn string_draw(
     dpy: *mut xlib::Display,
     draw: *mut xft::XftDraw,
     fonts: [Option<*mut xft::XftFont>; 4],
-    colors: &Vec<&xft::XftColor>,
+    colors: &Vec<xft::XftColor>,
     string: &str,
 ) {
     let write_pairs = fonts_vec_to_write_pairs(fonts, string_to_fonts_vec(xft, dpy, fonts, string));
@@ -240,7 +243,7 @@ unsafe fn string_draw(
         let chunk: String = string.chars().skip(char_offset).take(w_p.1).collect();
         (xft.XftDrawStringUtf8)(
             draw,                                        // Draw item to display on.
-            colors[w_p.0],                               // XftColor to use.
+            &colors[w_p.0],                              // XftColor to use.
             fonts[w_p.0].unwrap(),                       // XftFont to use.
             50 + x_offset as i32,                        // X (from top left)
             20,                                          // Y (from top left)
@@ -261,6 +264,89 @@ fn poll_stdin(stdin: std::io::Stdin, send: mpsc::Sender<String>) {
         } else {
             send.send(tmp.trim().to_owned()).unwrap();
         }
+    }
+}
+
+type Pair = (usize, usize);
+
+struct ValidString {
+    text: String,
+    background_pair: Pair,
+    underline_pair: Pair,
+    font_pair: Pair,
+    font_colour_pair: Pair,
+}
+
+impl ValidString {
+    fn empty() -> ValidString {
+        ValidString {
+            text: String::new(),
+            background_pair: (0, 0),
+            underline_pair: (0, 0),
+            font_pair: (0, 0),
+            font_colour_pair: (0, 0),
+        }
+    }
+
+    fn make_background_pairs(colours: &Vec<xft::XftColor>, input: &str) -> Vec<Pair> {
+        let mut in_format_block = false;
+        let mut next_is_index = false;
+        let mut closing_block = false;
+        let mut tmp_pair: Pair = (usize::MAX, 0);
+
+        let mut result: Vec<Pair> = input.chars().fold(Vec::new(), |mut acc, ch| {
+            if in_format_block {
+                if closing_block {
+                    match ch {
+                        'B' => {
+                            acc.push(tmp_pair);
+                            tmp_pair = (usize::MAX, 0);
+                        }
+                        '}' => {
+                            in_format_block = false;
+                            closing_block = false;
+                        }
+                        _ => (),
+                    }
+                } else {
+                    if next_is_index {
+                        if let Some(d) = ch.to_digit(10) {
+                            if d > (colours.len() - 1) as u32 {
+                                println!("Invalid background colour index -- TOO LARGE.");
+                            } else {
+                                acc.push(tmp_pair);
+                                tmp_pair = (d as usize, 0);
+                            }
+                        }
+                        next_is_index = false;
+                    } else {
+                        match ch {
+                            '/' => closing_block = true,
+                            'B' => next_is_index = true,
+                            '}' => in_format_block = false,
+                            _ => (),
+                        }
+                    }
+                }
+            } else {
+                match ch {
+                    '{' => in_format_block = true,
+                    _ => tmp_pair.1 += 1,
+                }
+            }
+            acc
+        });
+
+        result.push(tmp_pair);
+        result
+    }
+
+    fn parse_input(
+        fonts: [Option<*mut xft::XftFont>; 4],
+        colours: &Vec<xft::XftColor>,
+        input: String,
+    ) -> ValidString {
+        ValidString::empty()
     }
 }
 
@@ -350,7 +436,7 @@ fn main() {
 
         // Test func
         let tmp_fonts = [Some(font), Some(test_font), None, None];
-        let tmp_font_colors = vec![&font_colour, &test_font_colour];
+        let tmp_font_colors = vec![font_colour, test_font_colour];
 
         // StdinLock
         let lock = stdin();
@@ -364,6 +450,10 @@ fn main() {
             match rx.try_recv() {
                 Ok(s) => {
                     println!("{}", s);
+                    println!(
+                        "{:#?}",
+                        ValidString::make_background_pairs(&tmp_font_colors, &s)
+                    );
                     (xlib.XClearWindow)(dpy, window);
                     string_draw(&xft, dpy, draw, tmp_fonts, &tmp_font_colors, &s);
                 }
