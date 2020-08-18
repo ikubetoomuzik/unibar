@@ -1,11 +1,9 @@
+#![allow(dead_code, unused_variables)]
 // Super simple status bar written in rust with direct Xlib.
 // By: Curtis Jones
 // Started on Ausust 06, 2020
 
-use std::{
-    collections::HashMap, ffi::CString, io::stdin, mem, os::raw::*, process, ptr, sync::mpsc,
-    thread, time,
-};
+use std::{ffi::CString, io::stdin, mem, os::raw::*, process, ptr, sync::mpsc, thread, time};
 
 use x11_dl::{xft, xlib, xrender::XGlyphInfo};
 
@@ -149,6 +147,44 @@ unsafe fn poll_events(
     }
 }
 
+unsafe fn get_font(
+    xft: &xft::Xft,
+    dpy: *mut xlib::Display,
+    screen: c_int,
+    name: &str,
+) -> *mut xft::XftFont {
+    let tmp = (xft.XftFontOpenName)(
+        dpy,
+        screen,
+        CString::new("Hack:size=12:antialias=true")
+            .unwrap()
+            .as_ptr() as *const c_char,
+    );
+    if tmp.is_null() {
+        panic!("Font {} not found!!", name)
+    } else {
+        tmp
+    }
+}
+
+unsafe fn get_xft_colour(
+    xft: &xft::Xft,
+    dpy: *mut xlib::Display,
+    cmap: xlib::Colormap,
+    visual: *mut xlib::Visual,
+    name: &str,
+) -> xft::XftColor {
+    let mut tmp: xft::XftColor = mem::MaybeUninit::uninit().assume_init();
+    (xft.XftColorAllocName)(
+        dpy,
+        visual,
+        cmap,
+        CString::new(name).unwrap().as_ptr() as *const c_char,
+        &mut tmp,
+    );
+    tmp
+}
+
 unsafe fn get_color(
     xlib: &xlib::Xlib,
     dpy: *mut xlib::Display,
@@ -182,7 +218,7 @@ unsafe fn string_to_fonts_vec(
     })
 }
 
-fn fonts_vec_to_write_pairs(
+fn _fonts_vec_to_write_pairs(
     fonts: [Option<*mut xft::XftFont>; 4],
     fonts_vec: Vec<Option<*mut xft::XftFont>>,
 ) -> Vec<(usize, usize)> {
@@ -210,7 +246,7 @@ fn fonts_vec_to_write_pairs(
     tmp
 }
 
-unsafe fn string_pixel_width(
+unsafe fn _string_pixel_width(
     xft: &xft::Xft,
     dpy: *mut xlib::Display,
     font: *mut xft::XftFont,
@@ -227,7 +263,7 @@ unsafe fn string_pixel_width(
     extents.width as u32
 }
 
-unsafe fn string_draw(
+unsafe fn _string_draw(
     xft: &xft::Xft,
     dpy: *mut xlib::Display,
     draw: *mut xft::XftDraw,
@@ -235,7 +271,8 @@ unsafe fn string_draw(
     colors: &Vec<xft::XftColor>,
     string: &str,
 ) {
-    let write_pairs = fonts_vec_to_write_pairs(fonts, string_to_fonts_vec(xft, dpy, fonts, string));
+    let write_pairs =
+        _fonts_vec_to_write_pairs(fonts, string_to_fonts_vec(xft, dpy, fonts, string));
     let mut x_offset = 0;
     let mut char_offset = 0;
     println!("{:#?}", write_pairs);
@@ -250,7 +287,7 @@ unsafe fn string_draw(
             chunk.as_bytes().as_ptr() as *const c_uchar, // String to print.
             chunk.as_bytes().len() as c_int,             // Length of string.
         );
-        x_offset += string_pixel_width(xft, dpy, fonts[w_p.0].unwrap(), &chunk);
+        x_offset += _string_pixel_width(xft, dpy, fonts[w_p.0].unwrap(), &chunk);
         char_offset += w_p.1;
     }
 }
@@ -269,38 +306,75 @@ fn poll_stdin(stdin: std::io::Stdin, send: mpsc::Sender<String>) {
 
 type Pair = (usize, usize);
 
+struct ColourPalette {
+    background: Vec<xft::XftColor>,
+    highlight: Vec<xft::XftColor>,
+    font: Vec<xft::XftColor>,
+}
+
+enum IndexType {
+    BackgroundColour,
+    HighlightColour,
+    FontColour,
+    FontFace,
+}
+
 struct ValidString {
     text: String,
-    background_pair: Pair,
-    underline_pair: Pair,
-    font_pair: Pair,
-    font_colour_pair: Pair,
+    background_pair: Vec<Pair>,
+    underline_pair: Vec<Pair>,
+    font_pair: Vec<Pair>,
+    font_colour_pair: Vec<Pair>,
 }
 
 impl ValidString {
-    fn empty() -> ValidString {
+    fn _empty() -> ValidString {
         ValidString {
             text: String::new(),
-            background_pair: (0, 0),
-            underline_pair: (0, 0),
-            font_pair: (0, 0),
-            font_colour_pair: (0, 0),
+            background_pair: Vec::new(),
+            underline_pair: Vec::new(),
+            font_pair: Vec::new(),
+            font_colour_pair: Vec::new(),
         }
     }
 
-    fn make_background_pairs(colours: &Vec<xft::XftColor>, input: &str) -> Vec<Pair> {
+    fn _make_background_pairs(fonts: Vec<*mut xft::XftFont>, colours: &ColourPalette, input: &str) {
+        // Loop vars.
         let mut in_format_block = false;
         let mut next_is_index = false;
         let mut closing_block = false;
-        let mut tmp_pair: Pair = (usize::MAX, 0);
+        let mut index_type = IndexType::FontColour;
 
-        let mut result: Vec<Pair> = input.chars().fold(Vec::new(), |mut acc, ch| {
+        // Temp vars.
+        let mut printed_chars = String::new();
+        let mut background_vec: Vec<Pair> = Vec::new();
+        let mut background_pair: Pair = (usize::MAX, 0);
+        let mut highlight_vec: Vec<Pair> = Vec::new();
+        let mut highlight_pair: Pair = (usize::MAX, 0);
+        let mut font_colour_vec: Vec<Pair> = Vec::new();
+        let mut font_colour_pair: Pair = (0, 0);
+        let mut font_face_vec: Vec<Pair> = Vec::new();
+        let mut font_face_pair: Pair = (0, 0);
+
+        input.chars().for_each(|ch| {
             if in_format_block {
                 if closing_block {
                     match ch {
                         'B' => {
-                            acc.push(tmp_pair);
-                            tmp_pair = (usize::MAX, 0);
+                            background_vec.push(background_pair);
+                            background_pair = (usize::MAX, 0);
+                        }
+                        'H' => {
+                            highlight_vec.push(highlight_pair);
+                            highlight_pair = (usize::MAX, 0);
+                        }
+                        'F' => {
+                            font_colour_vec.push(font_colour_pair);
+                            font_colour_pair = (0, 0);
+                        }
+                        'f' => {
+                            font_face_vec.push(font_face_pair);
+                            font_face_pair = (0, 0);
                         }
                         '}' => {
                             in_format_block = false;
@@ -311,18 +385,61 @@ impl ValidString {
                 } else {
                     if next_is_index {
                         if let Some(d) = ch.to_digit(10) {
-                            if d > (colours.len() - 1) as u32 {
-                                println!("Invalid background colour index -- TOO LARGE.");
-                            } else {
-                                acc.push(tmp_pair);
-                                tmp_pair = (d as usize, 0);
+                            match index_type {
+                                IndexType::BackgroundColour => {
+                                    if d > (colours.background.len() - 1) as u32 {
+                                        println!("Invalid background colour index -- TOO LARGE.");
+                                    } else {
+                                        background_vec.push(background_pair);
+                                        background_pair = (d as usize, 0);
+                                    }
+                                }
+                                IndexType::HighlightColour => {
+                                    if d > (colours.highlight.len() - 1) as u32 {
+                                        println!("Invalid highlight colour index -- TOO LARGE.");
+                                    } else {
+                                        highlight_vec.push(highlight_pair);
+                                        highlight_pair = (d as usize, 0);
+                                    }
+                                }
+                                IndexType::FontColour => {
+                                    if d > (colours.font.len() - 1) as u32 {
+                                        println!("Invalid font colour index -- TOO LARGE.");
+                                    } else {
+                                        font_colour_vec.push(font_colour_pair);
+                                        font_colour_pair = (d as usize, 0);
+                                    }
+                                }
+                                IndexType::FontFace => {
+                                    if d > (fonts.len() - 1) as u32 {
+                                        println!("Invalid font face index -- TOO LARGE.");
+                                    } else {
+                                        font_face_vec.push(font_face_pair);
+                                        font_face_pair = (d as usize, 0);
+                                    }
+                                }
                             }
                         }
                         next_is_index = false;
                     } else {
                         match ch {
                             '/' => closing_block = true,
-                            'B' => next_is_index = true,
+                            'B' => {
+                                next_is_index = true;
+                                index_type = IndexType::BackgroundColour;
+                            }
+                            'H' => {
+                                next_is_index = true;
+                                index_type = IndexType::HighlightColour;
+                            }
+                            'F' => {
+                                next_is_index = true;
+                                index_type = IndexType::FontColour;
+                            }
+                            'f' => {
+                                next_is_index = true;
+                                index_type = IndexType::FontFace;
+                            }
                             '}' => in_format_block = false,
                             _ => (),
                         }
@@ -331,22 +448,20 @@ impl ValidString {
             } else {
                 match ch {
                     '{' => in_format_block = true,
-                    _ => tmp_pair.1 += 1,
+                    _ => {
+                        background_pair.1 += 1;
+                        printed_chars.push(ch);
+                    }
                 }
             }
-            acc
         });
 
-        result.push(tmp_pair);
-        result
-    }
+        background_vec.push(background_pair);
+        highlight_vec.push(highlight_pair);
+        font_colour_vec.push(font_colour_pair);
+        font_face_vec.push(font_face_pair);
 
-    fn parse_input(
-        fonts: [Option<*mut xft::XftFont>; 4],
-        colours: &Vec<xft::XftColor>,
-        input: String,
-    ) -> ValidString {
-        ValidString::empty()
+        println!("Backgrond Colour Pairs:\n{:#?}\nHighlight Colour Pairs:\n{:#?}\nFont Colour Pairs:\n{:#?}\nFont Face Pairs:\n{:#?}", background_vec, highlight_vec, font_colour_vec, font_face_vec);
     }
 }
 
@@ -361,6 +476,8 @@ fn main() {
         let root = (xlib.XRootWindow)(dpy, screen);
         let visual = (xlib.XDefaultVisual)(dpy, screen);
         let cmap = (xlib.XDefaultColormap)(dpy, screen);
+        // let height = (xlib.XDisplayHeight)(dpy, screen);
+        let width = (xlib.XDisplayWidth)(dpy, screen);
 
         // let white = (xlib.XWhitePixel)(dpy, screen);
         let backc = get_color(&xlib, dpy, cmap, "#282A36");
@@ -378,7 +495,7 @@ fn main() {
             root,                        // Parent window.
             0,                           // X position (from top-left.
             0,                           // Y position (from top-left.
-            1920,                        // Length of the bar in x direction.
+            width as u32,                // Length of the bar in x direction.
             32,                          // Height of the bar in y direction.
             0,                           // Border-width.
             xlib::CopyFromParent,        // Window depth.
@@ -388,60 +505,44 @@ fn main() {
             &mut attributes, // Pointer to the attributes to use.
         );
 
+        // Create draw object for the window.
+        let draw = (xft.XftDrawCreate)(dpy, window, visual, cmap);
+
         // Set the EWMH Atoms.
         set_atoms(&xlib, dpy, window);
 
         // Map this bitch
         (xlib.XMapWindow)(dpy, window);
 
-        // Set up Xft
-        let mut font_colour: xft::XftColor = mem::MaybeUninit::uninit().assume_init();
-        (xft.XftColorAllocName)(
-            dpy,
-            visual,
-            cmap,
-            CString::new("#8BE9FD").unwrap().as_ptr() as *const c_char,
-            &mut font_colour,
-        );
-        let font = (xft.XftFontOpenName)(
-            dpy,
-            screen,
-            CString::new("Hack:size=12:antialias=true")
-                .unwrap()
-                .as_ptr() as *const c_char,
-        );
-        let mut test_font_colour: xft::XftColor = mem::MaybeUninit::uninit().assume_init();
-        (xft.XftColorAllocName)(
-            dpy,
-            visual,
-            cmap,
-            CString::new("#FF79C6").unwrap().as_ptr() as *const c_char,
-            &mut test_font_colour,
-        );
-        let test_font = (xft.XftFontOpenName)(
-            dpy,
-            screen,
-            CString::new("Unifont Upper:size=16:antialias=true")
-                .unwrap()
-                .as_ptr() as *const c_char,
-        );
-
-        if font.is_null() || test_font.is_null() {
-            println!("NO FONT")
-        }
-        let draw = (xft.XftDrawCreate)(dpy, window, visual, cmap);
-
         // Init variables for event loop.
         let mut event: xlib::XEvent = mem::MaybeUninit::uninit().assume_init();
 
-        // Test func
-        let tmp_fonts = [Some(font), Some(test_font), None, None];
-        let tmp_font_colors = vec![font_colour, test_font_colour];
+        // Test vars
+        let fonts = vec![
+            get_font(&xft, dpy, screen, "Unifont Upper:size=16:antialias=true"),
+            get_font(&xft, dpy, screen, "Hack:size=12:antialias=true"),
+        ];
+        let colour_palette = ColourPalette {
+            background: vec![
+                get_xft_colour(&xft, dpy, cmap, visual, "#000000"),
+                get_xft_colour(&xft, dpy, cmap, visual, "#787878"),
+                get_xft_colour(&xft, dpy, cmap, visual, "#FFFFFF"),
+            ],
+            highlight: vec![
+                get_xft_colour(&xft, dpy, cmap, visual, "#FF0000"),
+                get_xft_colour(&xft, dpy, cmap, visual, "#00FF00"),
+                get_xft_colour(&xft, dpy, cmap, visual, "#0000FF"),
+            ],
+            font: vec![
+                get_xft_colour(&xft, dpy, cmap, visual, "#FF79C6"),
+                get_xft_colour(&xft, dpy, cmap, visual, "#8BE9FD"),
+                get_xft_colour(&xft, dpy, cmap, visual, "#0F0F0F"),
+            ],
+        };
 
-        // StdinLock
+        // Input thread. Has to be seperate to not block xlib events.
         let lock = stdin();
         let (tx, rx) = mpsc::channel();
-
         thread::spawn(move || poll_stdin(lock, tx));
 
         // Event loop previously mentioned.
@@ -449,13 +550,14 @@ fn main() {
             // Do we have some input waiting?
             match rx.try_recv() {
                 Ok(s) => {
+                    // Small kill marker for when I can't click.
+                    if s == "QUIT NOW" {
+                        break;
+                    }
                     println!("{}", s);
-                    println!(
-                        "{:#?}",
-                        ValidString::make_background_pairs(&tmp_font_colors, &s)
-                    );
+                    // ValidString::make_background_pairs(&tmp_font_colors, &s);
                     (xlib.XClearWindow)(dpy, window);
-                    string_draw(&xft, dpy, draw, tmp_fonts, &tmp_font_colors, &s);
+                    // string_draw(&xft, dpy, draw, tmp_fonts, &tmp_font_colors, &s);
                 }
                 Err(_) => (),
             }
@@ -471,14 +573,14 @@ fn main() {
                 match event.get_type() {
                     // We can draw unicode symbols woooooo. This was totally worth all this
                     // work... right?
-                    xlib::Expose => string_draw(
-                        &xft,
-                        dpy,
-                        draw,
-                        tmp_fonts,
-                        &tmp_font_colors,
-                        "HelloWorld! 🔉🔉 My name is Curtis🔉 and I can change fonts whenever.",
-                    ),
+                    // xlib::Expose => string_draw(
+                    //     &xft,
+                    //     dpy,
+                    //     draw,
+                    //     tmp_fonts,
+                    //     &tmp_font_colors,
+                    //     "HelloWorld! 🔉🔉 My name is Curtis🔉 and I can change fonts whenever.",
+                    // ),
                     xlib::ButtonPress => break,
                     _ => {}
                 }
@@ -489,7 +591,7 @@ fn main() {
             wait(500);
         }
 
-        (xft.XftColorFree)(dpy, visual, cmap, &mut font_colour);
+        // (xft.XftColorFree)(dpy, visual, cmap, &mut font_colour);
         (xft.XftDrawDestroy)(draw);
         (xlib.XFreeColormap)(dpy, cmap);
         (xlib.XDestroyWindow)(dpy, window);
