@@ -338,7 +338,11 @@ impl ValidString {
         }
     }
 
-    fn _make_background_pairs(fonts: Vec<*mut xft::XftFont>, colours: &ColourPalette, input: &str) {
+    fn make_background_pairs(
+        fonts: &Vec<*mut xft::XftFont>,
+        colours: &ColourPalette,
+        input: String,
+    ) {
         // Loop vars.
         let mut in_format_block = false;
         let mut next_is_index = false;
@@ -354,7 +358,7 @@ impl ValidString {
         let mut font_colour_vec: Vec<Pair> = Vec::new();
         let mut font_colour_pair: Pair = (0, 0);
         let mut font_face_vec: Vec<Pair> = Vec::new();
-        let mut font_face_pair: Pair = (0, 0);
+        let mut font_face_pair: Pair = (usize::MAX, 0);
 
         input.chars().for_each(|ch| {
             if in_format_block {
@@ -374,7 +378,7 @@ impl ValidString {
                         }
                         'f' => {
                             font_face_vec.push(font_face_pair);
-                            font_face_pair = (0, 0);
+                            font_face_pair = (usize::MAX, 0);
                         }
                         '}' => {
                             in_format_block = false;
@@ -450,18 +454,30 @@ impl ValidString {
                     '{' => in_format_block = true,
                     _ => {
                         background_pair.1 += 1;
+                        highlight_pair.1 += 1;
+                        font_colour_pair.1 += 1;
+                        font_face_pair.1 += 1;
                         printed_chars.push(ch);
                     }
                 }
             }
         });
 
-        background_vec.push(background_pair);
-        highlight_vec.push(highlight_pair);
-        font_colour_vec.push(font_colour_pair);
-        font_face_vec.push(font_face_pair);
+        // If our temp vars are 0 then we don't need this last push.
+        if background_pair.1 != 0 {
+            background_vec.push(background_pair)
+        }
+        if highlight_pair.1 != 0 {
+            highlight_vec.push(highlight_pair);
+        }
+        if font_colour_pair.1 != 0 {
+            font_colour_vec.push(font_colour_pair);
+        }
+        if font_face_pair.1 != 0 {
+            font_face_vec.push(font_face_pair);
+        }
 
-        println!("Backgrond Colour Pairs:\n{:#?}\nHighlight Colour Pairs:\n{:#?}\nFont Colour Pairs:\n{:#?}\nFont Face Pairs:\n{:#?}", background_vec, highlight_vec, font_colour_vec, font_face_vec);
+        println!("Backgrond Colour Pairs:\n{:#?}\nHighlight Colour Pairs:\n{:#?}\nFont Colour Pairs:\n{:#?}\nFont Face Pairs:\n{:#?}\nActual String:\n{}", background_vec, highlight_vec, font_colour_vec, font_face_vec, printed_chars);
     }
 }
 
@@ -555,7 +571,7 @@ fn main() {
                         break;
                     }
                     println!("{}", s);
-                    // ValidString::make_background_pairs(&tmp_font_colors, &s);
+                    ValidString::make_background_pairs(&fonts, &colour_palette, s);
                     (xlib.XClearWindow)(dpy, window);
                     // string_draw(&xft, dpy, draw, tmp_fonts, &tmp_font_colors, &s);
                 }
@@ -588,7 +604,7 @@ fn main() {
 
             // Trying this wait in the middle to see what happens. In the end the text bit has
             // gotta be first.
-            wait(500);
+            wait(250);
         }
 
         // (xft.XftColorFree)(dpy, visual, cmap, &mut font_colour);
