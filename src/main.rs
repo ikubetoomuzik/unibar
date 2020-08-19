@@ -238,6 +238,41 @@ enum IndexType {
     FontFace,
 }
 
+#[derive(Debug)]
+struct FontDisplay {
+    face_idx: usize,
+    col_idx: usize,
+    start: usize,
+    end: usize,
+}
+
+impl FontDisplay {
+    fn from(inp: (usize, usize, usize, usize)) -> FontDisplay {
+        let (face_idx, col_idx, start, end) = inp;
+        FontDisplay {
+            face_idx,
+            col_idx,
+            start,
+            end,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct DisplayType {
+    idx: usize,
+    start: usize,
+    end: usize,
+}
+
+impl DisplayType {
+    fn from(inp: (usize, usize, usize)) -> DisplayType {
+        let (idx, start, end) = inp;
+        DisplayType { idx, start, end }
+    }
+}
+
+#[derive(Debug)]
 struct ValidString {
     text: String,
     background_pair: Vec<Pair>,
@@ -257,49 +292,55 @@ impl ValidString {
         }
     }
 
-    unsafe fn default_font_face_pairs(
+    unsafe fn default_font_faces(
         xft: &xft::Xft,
         dpy: *mut xlib::Display,
         fonts: &Vec<*mut xft::XftFont>,
         string: &str,
-    ) -> Vec<(usize, usize)> {
-        let fonts_vec = string.chars().fold(Vec::new(), |mut acc, ch| {
-            acc.push(fonts.iter().find_map(|&f| {
-                if (xft.XftCharExists)(dpy, f, ch as c_uint) > 0 {
-                    Some(f)
-                } else {
-                    None
-                }
-            }));
-            acc
-        });
-        let mut tmp = Vec::new();
-        let mut tmp_pair: (usize, usize) = (0, 0);
-        fonts_vec.iter().for_each(|fo| {
-            if *fo == None {
-                if tmp_pair.0 == 0 {
-                    tmp_pair.1 += 1;
-                } else {
-                    tmp.push(tmp_pair);
-                    tmp_pair = (0, 1);
-                }
-            } else {
-                let font_idx = fonts
+    ) -> Vec<usize> {
+        string.chars().fold(Vec::new(), |mut acc, ch| {
+            acc.push(
+                match fonts
                     .iter()
-                    .enumerate()
-                    .find(|f| *(f.1) == fo.unwrap())
-                    .unwrap()
-                    .0;
-                if tmp_pair.0 == font_idx {
-                    tmp_pair.1 += 1;
-                } else {
-                    tmp.push(tmp_pair);
-                    tmp_pair = (font_idx, 1);
+                    .position(|&f| (xft.XftCharExists)(dpy, f, ch as c_uint) > 0)
+                {
+                    Some(i) => i,
+                    None => 0,
+                },
+            );
+            acc
+        })
+    }
+
+    fn merge_font_faces(mut default: Vec<usize>, explicit: Vec<DisplayType>) -> Vec<DisplayType> {
+        explicit.iter().for_each(|dt| {
+            if dt.idx != usize::MAX {
+                for i in dt.start..dt.end {
+                    default[i] = dt.idx;
                 }
             }
         });
-        tmp.push(tmp_pair);
-        tmp
+        let mut tmp: (usize, usize, usize) = (0, 0, 0);
+        let mut count = 0;
+
+        let mut result = default.iter().fold(Vec::new(), |mut acc, &i| {
+            if i != tmp.0 {
+                if count > 0 {
+                    tmp.2 = count;
+                    acc.push(DisplayType::from(tmp));
+                }
+                tmp = (i, count, 0);
+            }
+            count += 1;
+
+            acc
+        });
+        if count - tmp.1 > 0 {
+            tmp.2 = count;
+            result.push(DisplayType::from(tmp));
+        }
+
+        result
     }
 
     unsafe fn parse_input_string(
@@ -315,36 +356,42 @@ impl ValidString {
         let mut closing_block = false;
         let mut index_type = IndexType::FontColour;
 
-        // Temp vars.
+        // Result vars.
         let mut printed_chars = String::new();
-        let mut background_vec: Vec<Pair> = Vec::new();
-        let mut background_pair: Pair = (usize::MAX, 0);
-        let mut highlight_vec: Vec<Pair> = Vec::new();
-        let mut highlight_pair: Pair = (usize::MAX, 0);
-        let mut font_colour_vec: Vec<Pair> = Vec::new();
-        let mut font_colour_pair: Pair = (0, 0);
-        let mut font_face_vec: Vec<Pair> = Vec::new();
-        let mut font_face_pair: Pair = (usize::MAX, 0);
+        let mut background_vec: Vec<DisplayType> = Vec::new();
+        let mut highlight_vec: Vec<DisplayType> = Vec::new();
+        let mut font_colour_vec: Vec<DisplayType> = Vec::new();
+        let mut font_face_vec: Vec<DisplayType> = Vec::new();
+
+        // Temp vars.
+        let mut count: usize = 0;
+        let mut bckgrnd_tmp: (usize, usize, usize) = (usize::MAX, 0, 0);
+        let mut highlht_tmp: (usize, usize, usize) = (usize::MAX, 0, 0);
+        let mut fcol_tmp: (usize, usize, usize) = (0, 0, 0);
+        let mut fface_tmp: (usize, usize, usize) = (usize::MAX, 0, 0);
 
         input.chars().for_each(|ch| {
             if in_format_block {
                 if closing_block {
                     match ch {
                         'B' => {
-                            background_vec.push(background_pair);
-                            background_pair = (usize::MAX, 0);
+                            bckgrnd_tmp.2 = count;
+                            background_vec.push(DisplayType::from(bckgrnd_tmp));
+                            bckgrnd_tmp = (usize::MAX, count, 0);
                         }
                         'H' => {
-                            highlight_vec.push(highlight_pair);
-                            highlight_pair = (usize::MAX, 0);
+                            highlight_vec.push(DisplayType::from(highlht_tmp));
+                            highlht_tmp = (usize::MAX, count, 0);
                         }
                         'F' => {
-                            font_colour_vec.push(font_colour_pair);
-                            font_colour_pair = (0, 0);
+                            fcol_tmp.2 = count;
+                            font_colour_vec.push(DisplayType::from(fcol_tmp));
+                            fcol_tmp = (0, count, 0);
                         }
                         'f' => {
-                            font_face_vec.push(font_face_pair);
-                            font_face_pair = (usize::MAX, 0);
+                            fface_tmp.2 = count;
+                            font_face_vec.push(DisplayType::from(fface_tmp));
+                            fface_tmp = (usize::MAX, count, 0);
                         }
                         '}' => {
                             in_format_block = false;
@@ -360,32 +407,36 @@ impl ValidString {
                                     if d > (colours.background.len() - 1) as u32 {
                                         println!("Invalid background colour index -- TOO LARGE.");
                                     } else {
-                                        background_vec.push(background_pair);
-                                        background_pair = (d as usize, 0);
+                                        bckgrnd_tmp.2 = count;
+                                        background_vec.push(DisplayType::from(bckgrnd_tmp));
+                                        bckgrnd_tmp = (d as usize, count, 0);
                                     }
                                 }
                                 IndexType::HighlightColour => {
                                     if d > (colours.highlight.len() - 1) as u32 {
                                         println!("Invalid highlight colour index -- TOO LARGE.");
                                     } else {
-                                        highlight_vec.push(highlight_pair);
-                                        highlight_pair = (d as usize, 0);
+                                        highlht_tmp.2 = count;
+                                        highlight_vec.push(DisplayType::from(highlht_tmp));
+                                        highlht_tmp = (d as usize, count, 0);
                                     }
                                 }
                                 IndexType::FontColour => {
                                     if d > (colours.font.len() - 1) as u32 {
                                         println!("Invalid font colour index -- TOO LARGE.");
                                     } else {
-                                        font_colour_vec.push(font_colour_pair);
-                                        font_colour_pair = (d as usize, 0);
+                                        fcol_tmp.2 = count;
+                                        font_colour_vec.push(DisplayType::from(fcol_tmp));
+                                        fcol_tmp = (d as usize, count, 0);
                                     }
                                 }
                                 IndexType::FontFace => {
                                     if d > (fonts.len() - 1) as u32 {
                                         println!("Invalid font face index -- TOO LARGE.");
                                     } else {
-                                        font_face_vec.push(font_face_pair);
-                                        font_face_pair = (d as usize, 0);
+                                        fface_tmp.2 = count;
+                                        font_face_vec.push(DisplayType::from(fface_tmp));
+                                        fface_tmp = (d as usize, count, 0);
                                     }
                                 }
                             }
@@ -419,34 +470,36 @@ impl ValidString {
                 match ch {
                     '{' => in_format_block = true,
                     _ => {
-                        background_pair.1 += 1;
-                        highlight_pair.1 += 1;
-                        font_colour_pair.1 += 1;
-                        font_face_pair.1 += 1;
+                        count += 1;
                         printed_chars.push(ch);
                     }
                 }
             }
         });
 
+        bckgrnd_tmp.2 = count;
+        highlht_tmp.2 = count;
+        fcol_tmp.2 = count;
+        fface_tmp.2 = count;
+
         // If our temp vars are 0 then we don't need this last push.
-        if background_pair.1 != 0 {
-            background_vec.push(background_pair)
+        if bckgrnd_tmp.2 - bckgrnd_tmp.1 != 0 {
+            background_vec.push(DisplayType::from(bckgrnd_tmp))
         }
-        if highlight_pair.1 != 0 {
-            highlight_vec.push(highlight_pair);
+        if highlht_tmp.2 - highlht_tmp.1 != 0 {
+            highlight_vec.push(DisplayType::from(highlht_tmp));
         }
-        if font_colour_pair.1 != 0 {
-            font_colour_vec.push(font_colour_pair);
+        if fcol_tmp.2 - fcol_tmp.1 != 0 {
+            font_colour_vec.push(DisplayType::from(fcol_tmp));
         }
-        if font_face_pair.1 != 0 {
-            font_face_vec.push(font_face_pair);
+        if fface_tmp.2 - fface_tmp.1 != 0 {
+            font_face_vec.push(DisplayType::from(fface_tmp));
         }
 
-        let default_font_faces =
-            ValidString::default_font_face_pairs(&xft, dpy, &fonts, &printed_chars);
+        let default_font_faces = ValidString::default_font_faces(&xft, dpy, &fonts, &printed_chars);
+        let merged_faces = ValidString::merge_font_faces(default_font_faces, font_face_vec);
 
-        println!("Backgrond Colour Pairs:\n{:#?}\nHighlight Colour Pairs:\n{:#?}\nFont Colour Pairs:\n{:#?}\nFont Face Pairs:\n{:#?}\nDefault Font Face Pairs:\n{:#?}\nActual String:\n{}", background_vec, highlight_vec, font_colour_vec, font_face_vec, default_font_faces, printed_chars);
+        println!("Backgrond Colour Pairs:\n{:#?}\nHighlight Colour Pairs:\n{:#?}\nFont Colour Pairs:\n{:#?}\nMerged Faces:\n{:#?}\nActual String:\n{}", background_vec, highlight_vec, font_colour_vec, merged_faces, printed_chars);
     }
 }
 
