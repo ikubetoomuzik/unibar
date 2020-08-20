@@ -225,7 +225,7 @@ unsafe fn string_pixel_dist_vec(
             .find(|ft_oj| i >= ft_oj.start || i < ft_oj.end)
             .unwrap()
             .face_idx;
-        res.push(string_pixel_width(
+        let tmp = string_pixel_width(
             xft,
             dpy,
             fonts[ft_idx],
@@ -235,7 +235,8 @@ unsafe fn string_pixel_dist_vec(
                 .next()
                 .unwrap()
                 .encode_utf8(&mut [0u8; 4]),
-        ));
+        );
+        res.push(if tmp == 0 { 10 } else { tmp });
     }
     res
 }
@@ -283,6 +284,62 @@ enum IndexType {
 }
 
 #[derive(Debug)]
+struct BackDisplay {
+    idx: usize,
+    start: usize,
+    end: usize,
+}
+
+impl BackDisplay {
+    fn generate_list(
+        bkgrnd_objs: &Vec<DisplayType>,
+        char_pixel_widths: &Vec<u32>,
+    ) -> Vec<BackDisplay> {
+        bkgrnd_objs.iter().fold(Vec::new(), |mut acc, back_oj| {
+            let idx = back_oj.idx;
+            let start: u32 = char_pixel_widths.iter().take(back_oj.start).sum();
+            let end: u32 = char_pixel_widths
+                .iter()
+                .skip(back_oj.start)
+                .take(back_oj.end - back_oj.start)
+                .sum();
+            let start = start as usize;
+            let end = end as usize;
+            acc.push(BackDisplay { idx, start, end });
+            acc
+        })
+    }
+}
+
+#[derive(Debug)]
+struct HighDisplay {
+    idx: usize,
+    start: usize,
+    end: usize,
+}
+
+impl HighDisplay {
+    fn generate_list(
+        highlight_objs: &Vec<DisplayType>,
+        char_pixel_widths: &Vec<u32>,
+    ) -> Vec<HighDisplay> {
+        highlight_objs.iter().fold(Vec::new(), |mut acc, high_oj| {
+            let idx = high_oj.idx;
+            let start: u32 = char_pixel_widths.iter().take(high_oj.start).sum();
+            let end: u32 = char_pixel_widths
+                .iter()
+                .skip(high_oj.start)
+                .take(high_oj.end - high_oj.start)
+                .sum();
+            let start = start as usize;
+            let end = end as usize;
+            acc.push(HighDisplay { idx, start, end });
+            acc
+        })
+    }
+}
+
+#[derive(Debug)]
 struct FontDisplay {
     face_idx: usize,
     col_idx: usize,
@@ -291,15 +348,6 @@ struct FontDisplay {
 }
 
 impl FontDisplay {
-    fn from(inp: (usize, usize, usize, usize)) -> FontDisplay {
-        let (face_idx, col_idx, start, end) = inp;
-        FontDisplay {
-            face_idx,
-            col_idx,
-            start,
-            end,
-        }
-    }
     fn generate_list(
         col_objs: &Vec<DisplayType>,
         face_objs: &Vec<DisplayType>,
@@ -342,7 +390,7 @@ impl FontDisplay {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 struct DisplayType {
     idx: usize,
     start: usize,
@@ -353,27 +401,6 @@ impl DisplayType {
     fn from(inp: (usize, usize, usize)) -> DisplayType {
         let (idx, start, end) = inp;
         DisplayType { idx, start, end }
-    }
-}
-
-#[derive(Debug)]
-struct ValidString {
-    text: String,
-    background_pair: Vec<Pair>,
-    underline_pair: Vec<Pair>,
-    font_pair: Vec<Pair>,
-    font_colour_pair: Vec<Pair>,
-}
-
-impl ValidString {
-    fn empty() -> ValidString {
-        ValidString {
-            text: String::new(),
-            background_pair: Vec::new(),
-            underline_pair: Vec::new(),
-            font_pair: Vec::new(),
-            font_colour_pair: Vec::new(),
-        }
     }
 
     fn merge_font_faces(mut default: Vec<usize>, explicit: Vec<DisplayType>) -> Vec<DisplayType> {
@@ -386,7 +413,6 @@ impl ValidString {
         });
         let mut tmp: (usize, usize, usize) = (0, 0, 0);
         let mut count = 0;
-
         let mut result = default.iter().fold(Vec::new(), |mut acc, &i| {
             if i != tmp.0 {
                 if count > 0 {
@@ -396,15 +422,32 @@ impl ValidString {
                 tmp = (i, count, 0);
             }
             count += 1;
-
             acc
         });
         if count - tmp.1 > 0 {
             tmp.2 = count;
             result.push(DisplayType::from(tmp));
         }
-
         result
+    }
+}
+
+#[derive(Debug)]
+struct ValidString {
+    text: String,
+    text_display: Vec<FontDisplay>,
+    backgrounds: Vec<BackDisplay>,
+    highlights: Vec<HighDisplay>,
+}
+
+impl ValidString {
+    fn empty() -> ValidString {
+        ValidString {
+            text: String::new(),
+            text_display: Vec::new(),
+            backgrounds: Vec::new(),
+            highlights: Vec::new(),
+        }
     }
 
     unsafe fn parse_input_string(
@@ -413,7 +456,7 @@ impl ValidString {
         fonts: &Vec<*mut xft::XftFont>,
         colours: &ColourPalette,
         input: String,
-    ) {
+    ) -> ValidString {
         // Loop vars.
         let mut in_format_block = false;
         let mut next_is_index = false;
@@ -421,7 +464,7 @@ impl ValidString {
         let mut index_type = IndexType::FontColour;
 
         // Result vars.
-        let mut printed_chars = String::new();
+        let mut text = String::new();
         let mut background_vec: Vec<DisplayType> = Vec::new();
         let mut highlight_vec: Vec<DisplayType> = Vec::new();
         let mut font_colour_vec: Vec<DisplayType> = Vec::new();
@@ -537,7 +580,7 @@ impl ValidString {
                     _ => {
                         count += 1;
                         default_font_faces.push(default_font_idx(&xft, dpy, fonts, ch));
-                        printed_chars.push(ch);
+                        text.push(ch);
                     }
                 }
             }
@@ -562,13 +605,44 @@ impl ValidString {
             font_face_vec.push(DisplayType::from(fface_tmp));
         }
 
-        let merged_faces = ValidString::merge_font_faces(default_font_faces, font_face_vec);
-        let font_list = FontDisplay::generate_list(&font_colour_vec, &merged_faces);
-        let font_distance_vec = string_pixel_dist_vec(&xft, dpy, fonts, &font_list, &printed_chars);
+        let background_vec: Vec<DisplayType> = background_vec
+            .iter()
+            .filter_map(|&bk_oj| {
+                if bk_oj.idx != usize::MAX {
+                    Some(bk_oj)
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-        println!("Backgrond Colour Pairs:\n{:#?}\nHighlight Colour Pairs:\n{:#?}\nFont Colour Pairs:\n{:#?}\nMerged Faces:\n{:#?}\nActual String:\n{}", background_vec, highlight_vec, font_colour_vec, merged_faces, printed_chars);
-        println!("Font Objects?: \n{:#?}", font_list);
-        println!("String Width Vec [0] = width of char0 + char1, ... , [end] = width of charEND: \n{:#?}", font_distance_vec);
+        let highlight_vec: Vec<DisplayType> = highlight_vec
+            .iter()
+            .filter_map(|&hi_oj| {
+                if hi_oj.idx != usize::MAX {
+                    Some(hi_oj)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let merged_faces = DisplayType::merge_font_faces(default_font_faces, font_face_vec);
+        let text_display = FontDisplay::generate_list(&font_colour_vec, &merged_faces);
+        let char_pixel_widths = string_pixel_dist_vec(&xft, dpy, fonts, &text_display, &text);
+        let highlights = HighDisplay::generate_list(&highlight_vec, &char_pixel_widths);
+        let backgrounds = BackDisplay::generate_list(&background_vec, &char_pixel_widths);
+
+        println!("Font Objects?: \n{:#?}", text_display);
+        println!("Background Objects?: \n{:#?}", backgrounds);
+        println!("Highlight Objects?: \n{:#?}", highlights);
+
+        ValidString {
+            text,
+            text_display,
+            backgrounds,
+            highlights,
+        }
     }
 }
 
@@ -663,7 +737,8 @@ fn main() {
                         break;
                     }
                     println!("{}", s);
-                    ValidString::parse_input_string(&xft, dpy, &fonts, &colour_palette, s);
+                    let input =
+                        ValidString::parse_input_string(&xft, dpy, &fonts, &colour_palette, s);
                     (xlib.XClearWindow)(dpy, window);
                     // string_draw(&xft, dpy, draw, tmp_fonts, &tmp_font_colors, &s);
                 }
