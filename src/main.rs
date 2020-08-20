@@ -194,7 +194,7 @@ unsafe fn get_color(
     temp.pixel
 }
 
-unsafe fn _string_pixel_width(
+unsafe fn string_pixel_width(
     xft: &xft::Xft,
     dpy: *mut xlib::Display,
     font: *mut xft::XftFont,
@@ -211,6 +211,35 @@ unsafe fn _string_pixel_width(
     extents.width as u32
 }
 
+unsafe fn string_pixel_dist_vec(
+    xft: &xft::Xft,
+    dpy: *mut xlib::Display,
+    fonts: &Vec<*mut xft::XftFont>,
+    ft_dpy_ojs: &Vec<FontDisplay>,
+    string: &str,
+) -> Vec<u32> {
+    let mut res = Vec::new();
+    for i in 0..string.chars().count() {
+        let ft_idx = ft_dpy_ojs
+            .iter()
+            .find(|ft_oj| i >= ft_oj.start || i < ft_oj.end)
+            .unwrap()
+            .face_idx;
+        res.push(string_pixel_width(
+            xft,
+            dpy,
+            fonts[ft_idx],
+            &string
+                .chars()
+                .skip(i)
+                .next()
+                .unwrap()
+                .encode_utf8(&mut [0u8; 4]),
+        ));
+    }
+    res
+}
+
 fn poll_stdin(stdin: std::io::Stdin, send: mpsc::Sender<String>) {
     loop {
         let mut tmp = String::new();
@@ -220,6 +249,21 @@ fn poll_stdin(stdin: std::io::Stdin, send: mpsc::Sender<String>) {
         } else {
             send.send(tmp.trim().to_owned()).unwrap();
         }
+    }
+}
+
+unsafe fn default_font_idx(
+    xft: &xft::Xft,
+    dpy: *mut xlib::Display,
+    fonts: &Vec<*mut xft::XftFont>,
+    chr: char,
+) -> usize {
+    match fonts
+        .iter()
+        .position(|&f| (xft.XftCharExists)(dpy, f, chr as c_uint) > 0)
+    {
+        Some(i) => i,
+        None => 0,
     }
 }
 
@@ -256,6 +300,46 @@ impl FontDisplay {
             end,
         }
     }
+    fn generate_list(
+        col_objs: &Vec<DisplayType>,
+        face_objs: &Vec<DisplayType>,
+    ) -> Vec<FontDisplay> {
+        let mut strt_idx = 0;
+        col_objs.iter().fold(Vec::new(), |mut acc, cl_oj| {
+            let col_idx = cl_oj.idx;
+            let mut tmp: Vec<FontDisplay> = Vec::new();
+            for i in strt_idx..face_objs.len() {
+                let fc_oj = &face_objs[i];
+                let face_idx = fc_oj.idx;
+                let start = if fc_oj.start <= cl_oj.start {
+                    cl_oj.start
+                } else {
+                    fc_oj.start
+                };
+                let end = if fc_oj.end >= cl_oj.end {
+                    cl_oj.end
+                } else {
+                    fc_oj.end
+                };
+
+                if start != end {
+                    tmp.push(FontDisplay {
+                        face_idx,
+                        col_idx,
+                        start,
+                        end,
+                    });
+                }
+
+                if fc_oj.end >= cl_oj.end {
+                    strt_idx = i;
+                    break;
+                }
+            }
+            acc.append(&mut tmp);
+            acc
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -290,26 +374,6 @@ impl ValidString {
             font_pair: Vec::new(),
             font_colour_pair: Vec::new(),
         }
-    }
-
-    unsafe fn default_font_faces(
-        xft: &xft::Xft,
-        dpy: *mut xlib::Display,
-        fonts: &Vec<*mut xft::XftFont>,
-        string: &str,
-    ) -> Vec<usize> {
-        string.chars().fold(Vec::new(), |mut acc, ch| {
-            acc.push(
-                match fonts
-                    .iter()
-                    .position(|&f| (xft.XftCharExists)(dpy, f, ch as c_uint) > 0)
-                {
-                    Some(i) => i,
-                    None => 0,
-                },
-            );
-            acc
-        })
     }
 
     fn merge_font_faces(mut default: Vec<usize>, explicit: Vec<DisplayType>) -> Vec<DisplayType> {
@@ -362,6 +426,7 @@ impl ValidString {
         let mut highlight_vec: Vec<DisplayType> = Vec::new();
         let mut font_colour_vec: Vec<DisplayType> = Vec::new();
         let mut font_face_vec: Vec<DisplayType> = Vec::new();
+        let mut default_font_faces: Vec<usize> = Vec::new();
 
         // Temp vars.
         let mut count: usize = 0;
@@ -471,6 +536,7 @@ impl ValidString {
                     '{' => in_format_block = true,
                     _ => {
                         count += 1;
+                        default_font_faces.push(default_font_idx(&xft, dpy, fonts, ch));
                         printed_chars.push(ch);
                     }
                 }
@@ -496,10 +562,13 @@ impl ValidString {
             font_face_vec.push(DisplayType::from(fface_tmp));
         }
 
-        let default_font_faces = ValidString::default_font_faces(&xft, dpy, &fonts, &printed_chars);
         let merged_faces = ValidString::merge_font_faces(default_font_faces, font_face_vec);
+        let font_list = FontDisplay::generate_list(&font_colour_vec, &merged_faces);
+        let font_distance_vec = string_pixel_dist_vec(&xft, dpy, fonts, &font_list, &printed_chars);
 
         println!("Backgrond Colour Pairs:\n{:#?}\nHighlight Colour Pairs:\n{:#?}\nFont Colour Pairs:\n{:#?}\nMerged Faces:\n{:#?}\nActual String:\n{}", background_vec, highlight_vec, font_colour_vec, merged_faces, printed_chars);
+        println!("Font Objects?: \n{:#?}", font_list);
+        println!("String Width Vec [0] = width of char0 + char1, ... , [end] = width of charEND: \n{:#?}", font_distance_vec);
     }
 }
 
