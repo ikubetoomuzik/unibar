@@ -295,18 +295,22 @@ impl BackDisplay {
                     start += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
                 }
             }
+
             // Generate the end pixel val.
             let mut end = 0;
             for i in 0..text_display.len() {
                 let font_display = &text_display[i];
-                if font_display.end <= back_oj.end {
+                if font_display.start == back_oj.end {
+                    let chunk: String = text.chars().skip(font_display.start).take(1).collect();
+                    end += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
+                    break;
+                } else if font_display.end <= back_oj.end {
                     let chunk: String = text
                         .chars()
                         .skip(font_display.start)
                         .take(font_display.end - font_display.start)
                         .collect();
                     end += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
-                    break;
                 } else {
                     let chunk: String = text
                         .chars()
@@ -314,8 +318,10 @@ impl BackDisplay {
                         .take(back_oj.end - font_display.start)
                         .collect();
                     end += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
+                    break;
                 }
             }
+
             acc.push(BackDisplay {
                 idx: back_oj.idx,
                 start: start as usize,
@@ -363,32 +369,38 @@ impl HighDisplay {
                     let chunk: String = text
                         .chars()
                         .skip(font_display.start)
-                        .take(font_display.start - font_display.start)
+                        .take(font_display.end - font_display.start)
                         .collect();
                     start += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
                 }
             }
+
             // Generate the end pixel val.
             let mut end = 0;
             for i in 0..text_display.len() {
                 let font_display = &text_display[i];
-                if font_display.end <= high_oj.end {
+                if font_display.start == high_oj.end {
+                    let chunk: String = text.chars().skip(font_display.start).take(1).collect();
+                    end += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
+                    break;
+                } else if font_display.end <= high_oj.end {
                     let chunk: String = text
                         .chars()
                         .skip(font_display.start)
                         .take(font_display.end - font_display.start)
                         .collect();
                     end += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
-                    break;
                 } else {
                     let chunk: String = text
                         .chars()
                         .skip(font_display.start)
                         .take(high_oj.end - font_display.start)
                         .collect();
-                    start += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
+                    end += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
+                    break;
                 }
             }
+
             acc.push(HighDisplay {
                 idx: high_oj.idx,
                 start: start as usize,
@@ -548,6 +560,7 @@ impl ValidString {
                             bckgrnd_tmp = (usize::MAX, count, 0);
                         }
                         'H' => {
+                            highlht_tmp.2 = count;
                             highlight_vec.push(DisplayType::from(highlht_tmp));
                             highlht_tmp = (usize::MAX, count, 0);
                         }
@@ -694,10 +707,6 @@ impl ValidString {
         let backgrounds =
             BackDisplay::gen_list(xft, dpy, fonts, &background_vec, &text_display, &text);
 
-        println!("Font Objects?: \n{:#?}", text_display);
-        println!("Background Objects?: \n{:#?}", backgrounds);
-        println!("Highlight Objects?: \n{:#?}", highlights);
-
         ValidString {
             text,
             text_display,
@@ -715,7 +724,7 @@ impl ValidString {
         fonts: &Vec<*mut xft::XftFont>,
         x_start: i32,
         y_font: i32,
-        highlight_height: i32,
+        highlight_height: u32,
     ) {
         let bar_height = 32;
         // Displaying the backgrounds first.
@@ -729,7 +738,20 @@ impl ValidString {
                 bar_height,
             );
         });
-        // For now we just draw text to make this simple.
+        // End of the background bit.
+        // Display the highlights next.
+        self.highlights.iter().for_each(|h| {
+            (xft.XftDrawRect)(
+                draw,
+                &palette.highlight[h.idx],
+                x_start + h.start as c_int,
+                (bar_height - highlight_height) as c_int,
+                (h.end - h.start) as c_uint,
+                highlight_height as c_uint,
+            );
+        });
+        // End of highlight bit.
+        // Do the font bits last.
         let mut offset = 0;
         self.text_display.iter().for_each(|td| {
             let chunk: String = self
@@ -810,8 +832,10 @@ fn main() {
 
         // Test vars
         let fonts = vec![
-            get_font(&xft, dpy, screen, "Hack:size=12:antialias=true"),
-            get_font(&xft, dpy, screen, "Unifont Upper:size=16:antialias=true"),
+            get_font(&xft, dpy, screen, "Anonymous Pro:size=12:antialias=true"),
+            get_font(&xft, dpy, screen, "Unifont Upper:size=14:antialias=true"),
+            get_font(&xft, dpy, screen, "Siji:size=8:"),
+            get_font(&xft, dpy, screen, "Unifont:size=14:antialias=true"),
         ];
         let colour_palette = ColourPalette {
             background: vec![
@@ -845,11 +869,10 @@ fn main() {
                     if s == "QUIT NOW" {
                         break;
                     }
-                    println!("{}", s);
                     let input =
                         ValidString::parse_input_string(&xft, dpy, &fonts, &colour_palette, s);
                     (xlib.XClearWindow)(dpy, window);
-                    input.draw(&xft, dpy, draw, &colour_palette, &fonts, 50, 20, 8);
+                    input.draw(&xft, dpy, draw, &colour_palette, &fonts, 0, 22, 4);
                 }
                 Err(_) => (),
             }
@@ -863,16 +886,6 @@ fn main() {
                 &mut event,
             ) {
                 match event.get_type() {
-                    // We can draw unicode symbols woooooo. This was totally worth all this
-                    // work... right?
-                    // xlib::Expose => string_draw(
-                    //     &xft,
-                    //     dpy,
-                    //     draw,
-                    //     tmp_fonts,
-                    //     &tmp_font_colors,
-                    //     "HelloWorld! 🔉🔉 My name is Curtis🔉 and I can change fonts whenever.",
-                    // ),
                     xlib::ButtonPress => break,
                     _ => {}
                 }
