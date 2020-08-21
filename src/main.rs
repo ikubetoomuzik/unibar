@@ -211,36 +211,6 @@ unsafe fn string_pixel_width(
     extents.width as u32
 }
 
-unsafe fn string_pixel_dist_vec(
-    xft: &xft::Xft,
-    dpy: *mut xlib::Display,
-    fonts: &Vec<*mut xft::XftFont>,
-    ft_dpy_ojs: &Vec<FontDisplay>,
-    string: &str,
-) -> Vec<u32> {
-    let mut res = Vec::new();
-    for i in 0..string.chars().count() {
-        let ft_idx = ft_dpy_ojs
-            .iter()
-            .find(|ft_oj| i >= ft_oj.start || i < ft_oj.end)
-            .unwrap()
-            .face_idx;
-        let tmp = string_pixel_width(
-            xft,
-            dpy,
-            fonts[ft_idx],
-            &string
-                .chars()
-                .skip(i)
-                .next()
-                .unwrap()
-                .encode_utf8(&mut [0u8; 4]),
-        );
-        res.push(if tmp == 0 { 10 } else { tmp });
-    }
-    res
-}
-
 fn poll_stdin(stdin: std::io::Stdin, send: mpsc::Sender<String>) {
     loop {
         let mut tmp = String::new();
@@ -291,21 +261,66 @@ struct BackDisplay {
 }
 
 impl BackDisplay {
-    fn generate_list(
-        bkgrnd_objs: &Vec<DisplayType>,
-        char_pixel_widths: &Vec<u32>,
+    unsafe fn gen_list(
+        xft: &xft::Xft,
+        dpy: *mut xlib::Display,
+        fonts: &Vec<*mut xft::XftFont>,
+        background_objs: &Vec<DisplayType>,
+        text_display: &Vec<FontDisplay>,
+        text: &str,
     ) -> Vec<BackDisplay> {
-        bkgrnd_objs.iter().fold(Vec::new(), |mut acc, back_oj| {
-            let idx = back_oj.idx;
-            let start: u32 = char_pixel_widths.iter().take(back_oj.start).sum();
-            let end: u32 = char_pixel_widths
-                .iter()
-                .skip(back_oj.start)
-                .take(back_oj.end - back_oj.start)
-                .sum();
-            let start = start as usize;
-            let end = end as usize;
-            acc.push(BackDisplay { idx, start, end });
+        background_objs.iter().fold(Vec::new(), |mut acc, back_oj| {
+            // Generate the start pixel val.
+            let mut start = 0;
+            for i in 0..text_display.len() {
+                let font_display = &text_display[i];
+                if font_display.start == back_oj.start {
+                    let chunk: String = text.chars().skip(font_display.start).take(1).collect();
+                    start += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
+                    break;
+                } else if font_display.end > back_oj.start {
+                    let chunk: String = text
+                        .chars()
+                        .skip(font_display.start)
+                        .take(back_oj.start - font_display.start)
+                        .collect();
+                    start += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
+                    break;
+                } else {
+                    let chunk: String = text
+                        .chars()
+                        .skip(font_display.start)
+                        .take(font_display.start - font_display.start)
+                        .collect();
+                    start += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
+                }
+            }
+            // Generate the end pixel val.
+            let mut end = 0;
+            for i in 0..text_display.len() {
+                let font_display = &text_display[i];
+                if font_display.end <= back_oj.end {
+                    let chunk: String = text
+                        .chars()
+                        .skip(font_display.start)
+                        .take(font_display.end - font_display.start)
+                        .collect();
+                    end += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
+                    break;
+                } else {
+                    let chunk: String = text
+                        .chars()
+                        .skip(font_display.start)
+                        .take(back_oj.end - font_display.start)
+                        .collect();
+                    end += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
+                }
+            }
+            acc.push(BackDisplay {
+                idx: back_oj.idx,
+                start: start as usize,
+                end: end as usize,
+            });
             acc
         })
     }
@@ -319,21 +334,66 @@ struct HighDisplay {
 }
 
 impl HighDisplay {
-    fn generate_list(
+    unsafe fn gen_list(
+        xft: &xft::Xft,
+        dpy: *mut xlib::Display,
+        fonts: &Vec<*mut xft::XftFont>,
         highlight_objs: &Vec<DisplayType>,
-        char_pixel_widths: &Vec<u32>,
+        text_display: &Vec<FontDisplay>,
+        text: &str,
     ) -> Vec<HighDisplay> {
         highlight_objs.iter().fold(Vec::new(), |mut acc, high_oj| {
-            let idx = high_oj.idx;
-            let start: u32 = char_pixel_widths.iter().take(high_oj.start).sum();
-            let end: u32 = char_pixel_widths
-                .iter()
-                .skip(high_oj.start)
-                .take(high_oj.end - high_oj.start)
-                .sum();
-            let start = start as usize;
-            let end = end as usize;
-            acc.push(HighDisplay { idx, start, end });
+            // Generate the start pixel val.
+            let mut start = 0;
+            for i in 0..text_display.len() {
+                let font_display = &text_display[i];
+                if font_display.start == high_oj.start {
+                    let chunk: String = text.chars().skip(font_display.start).take(1).collect();
+                    start += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
+                    break;
+                } else if font_display.end > high_oj.start {
+                    let chunk: String = text
+                        .chars()
+                        .skip(font_display.start)
+                        .take(high_oj.start - font_display.start)
+                        .collect();
+                    start += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
+                    break;
+                } else {
+                    let chunk: String = text
+                        .chars()
+                        .skip(font_display.start)
+                        .take(font_display.start - font_display.start)
+                        .collect();
+                    start += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
+                }
+            }
+            // Generate the end pixel val.
+            let mut end = 0;
+            for i in 0..text_display.len() {
+                let font_display = &text_display[i];
+                if font_display.end <= high_oj.end {
+                    let chunk: String = text
+                        .chars()
+                        .skip(font_display.start)
+                        .take(font_display.end - font_display.start)
+                        .collect();
+                    end += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
+                    break;
+                } else {
+                    let chunk: String = text
+                        .chars()
+                        .skip(font_display.start)
+                        .take(high_oj.end - font_display.start)
+                        .collect();
+                    start += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
+                }
+            }
+            acc.push(HighDisplay {
+                idx: high_oj.idx,
+                start: start as usize,
+                end: end as usize,
+            });
             acc
         })
     }
@@ -629,9 +689,10 @@ impl ValidString {
 
         let merged_faces = DisplayType::merge_font_faces(default_font_faces, font_face_vec);
         let text_display = FontDisplay::generate_list(&font_colour_vec, &merged_faces);
-        let char_pixel_widths = string_pixel_dist_vec(&xft, dpy, fonts, &text_display, &text);
-        let highlights = HighDisplay::generate_list(&highlight_vec, &char_pixel_widths);
-        let backgrounds = BackDisplay::generate_list(&background_vec, &char_pixel_widths);
+        let highlights =
+            HighDisplay::gen_list(xft, dpy, fonts, &highlight_vec, &text_display, &text);
+        let backgrounds =
+            BackDisplay::gen_list(xft, dpy, fonts, &background_vec, &text_display, &text);
 
         println!("Font Objects?: \n{:#?}", text_display);
         println!("Background Objects?: \n{:#?}", backgrounds);
@@ -643,6 +704,54 @@ impl ValidString {
             backgrounds,
             highlights,
         }
+    }
+
+    unsafe fn draw(
+        &self,
+        xft: &xft::Xft,
+        dpy: *mut xlib::Display,
+        draw: *mut xft::XftDraw,
+        palette: &ColourPalette,
+        fonts: &Vec<*mut xft::XftFont>,
+        x_start: i32,
+        y_font: i32,
+        highlight_height: i32,
+    ) {
+        let bar_height = 32;
+        // Displaying the backgrounds first.
+        self.backgrounds.iter().for_each(|b| {
+            (xft.XftDrawRect)(
+                draw,
+                &palette.background[b.idx],
+                x_start + b.start as c_int,
+                0,
+                (b.end - b.start) as c_uint,
+                bar_height,
+            );
+        });
+        // For now we just draw text to make this simple.
+        let mut offset = 0;
+        self.text_display.iter().for_each(|td| {
+            let chunk: String = self
+                .text
+                .chars()
+                .skip(td.start)
+                .take(td.end - td.start)
+                .collect();
+            let font = fonts[td.face_idx];
+            let font_colour = palette.font[td.col_idx];
+            (xft.XftDrawStringUtf8)(
+                draw,
+                &font_colour,
+                font,
+                x_start + offset,
+                y_font,
+                chunk.as_bytes().as_ptr() as *const c_uchar,
+                chunk.as_bytes().len() as c_int,
+            );
+            offset += string_pixel_width(xft, dpy, font, &chunk) as c_int;
+        });
+        // End of font bit.
     }
 }
 
@@ -740,7 +849,7 @@ fn main() {
                     let input =
                         ValidString::parse_input_string(&xft, dpy, &fonts, &colour_palette, s);
                     (xlib.XClearWindow)(dpy, window);
-                    // string_draw(&xft, dpy, draw, tmp_fonts, &tmp_font_colors, &s);
+                    input.draw(&xft, dpy, draw, &colour_palette, &fonts, 50, 20, 8);
                 }
                 Err(_) => (),
             }
