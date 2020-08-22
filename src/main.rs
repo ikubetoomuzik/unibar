@@ -275,8 +275,6 @@ impl BackDisplay {
             for i in 0..text_display.len() {
                 let font_display = &text_display[i];
                 if font_display.start == back_oj.start {
-                    let chunk: String = text.chars().skip(font_display.start).take(1).collect();
-                    start += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
                     break;
                 } else if font_display.end > back_oj.start {
                     let chunk: String = text
@@ -290,12 +288,11 @@ impl BackDisplay {
                     let chunk: String = text
                         .chars()
                         .skip(font_display.start)
-                        .take(font_display.start - font_display.start)
+                        .take(font_display.end - font_display.start)
                         .collect();
                     start += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
                 }
             }
-
             // Generate the end pixel val.
             let mut end = 0;
             for i in 0..text_display.len() {
@@ -321,7 +318,6 @@ impl BackDisplay {
                     break;
                 }
             }
-
             acc.push(BackDisplay {
                 idx: back_oj.idx,
                 start: start as usize,
@@ -354,8 +350,6 @@ impl HighDisplay {
             for i in 0..text_display.len() {
                 let font_display = &text_display[i];
                 if font_display.start == high_oj.start {
-                    let chunk: String = text.chars().skip(font_display.start).take(1).collect();
-                    start += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
                     break;
                 } else if font_display.end > high_oj.start {
                     let chunk: String = text
@@ -374,7 +368,6 @@ impl HighDisplay {
                     start += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
                 }
             }
-
             // Generate the end pixel val.
             let mut end = 0;
             for i in 0..text_display.len() {
@@ -400,7 +393,6 @@ impl HighDisplay {
                     break;
                 }
             }
-
             acc.push(HighDisplay {
                 idx: high_oj.idx,
                 start: start as usize,
@@ -771,6 +763,7 @@ impl ValidString {
                 chunk.as_bytes().as_ptr() as *const c_uchar,
                 chunk.as_bytes().len() as c_int,
             );
+            let chr = chunk.chars().next().unwrap();
             offset += string_pixel_width(xft, dpy, font, &chunk) as c_int;
         });
         // End of font bit.
