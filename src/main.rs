@@ -246,6 +246,26 @@ struct ColourPalette {
     font: Vec<xft::XftColor>,
 }
 
+impl ColourPalette {
+    unsafe fn destroy(
+        mut self,
+        xft: &xft::Xft,
+        dpy: *mut xlib::Display,
+        cmap: xlib::Colormap,
+        visual: *mut xlib::Visual,
+    ) {
+        self.background
+            .drain(..)
+            .for_each(|mut col| (xft.XftColorFree)(dpy, visual, cmap, &mut col));
+        self.highlight
+            .drain(..)
+            .for_each(|mut col| (xft.XftColorFree)(dpy, visual, cmap, &mut col));
+        self.font
+            .drain(..)
+            .for_each(|mut col| (xft.XftColorFree)(dpy, visual, cmap, &mut col));
+    }
+}
+
 enum IndexType {
     BackgroundColour,
     HighlightColour,
@@ -865,7 +885,7 @@ fn main() {
                     let input =
                         ValidString::parse_input_string(&xft, dpy, &fonts, &colour_palette, s);
                     (xlib.XClearWindow)(dpy, window);
-                    input.draw(&xft, dpy, draw, &colour_palette, &fonts, 0, 22, 4);
+                    input.draw(&xft, dpy, draw, &colour_palette, &fonts, 0, 18, 4);
                 }
                 Err(_) => (),
             }
@@ -889,7 +909,7 @@ fn main() {
             wait(250);
         }
 
-        // (xft.XftColorFree)(dpy, visual, cmap, &mut font_colour);
+        colour_palette.destroy(&xft, dpy, cmap, visual);
         (xft.XftDrawDestroy)(draw);
         (xlib.XFreeColormap)(dpy, cmap);
         (xlib.XDestroyWindow)(dpy, window);
