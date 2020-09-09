@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 x11-dl = "2.18.5"
 libc = "0.2.74"
+dirs = "3.0.1"
