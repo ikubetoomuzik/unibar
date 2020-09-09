@@ -60,7 +60,7 @@ impl Config {
         };
         for (i, line) in (1..).zip(conf_file.lines()) {
             // line to allow comments
-            if line.starts_with('#') {
+            if line.starts_with('#') || line.is_empty() {
                 continue;
             }
             let mut line = line.split('=');

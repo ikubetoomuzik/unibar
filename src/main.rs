@@ -6,7 +6,7 @@ use unibar::*;
 
 fn main() {
     unsafe {
-        let conf = Config::from_file("config");
+        let conf = Config::from_file("unibar.conf");
         let mut bar = Bar::new();
         bar.load_config(conf);
         bar.init();
