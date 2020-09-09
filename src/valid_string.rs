@@ -1,4 +1,3 @@
-#![allow(dead_code, unused_variables)]
 // File to define the valid string type we are using for display.
 // By: Curtis Jones <mail@curtisjones.ca>
 // Started on: September 07, 2020
@@ -519,66 +518,5 @@ impl ValidString {
             backgrounds,
             highlights,
         }
-    }
-
-    pub unsafe fn draw(
-        &self,
-        xft: &xft::Xft,
-        dpy: *mut xlib::Display,
-        draw: *mut xft::XftDraw,
-        palette: &ColourPalette,
-        fonts: &Vec<*mut xft::XftFont>,
-        x_start: i32,
-        y_font: i32,
-        highlight_height: u32,
-    ) {
-        let bar_height = 32;
-        // Displaying the backgrounds first.
-        self.backgrounds.iter().for_each(|b| {
-            (xft.XftDrawRect)(
-                draw,
-                &palette.background[b.idx],
-                x_start + b.start as c_int,
-                0,
-                (b.end - b.start) as c_uint,
-                bar_height,
-            );
-        });
-        // End of the background bit.
-        // Display the highlights next.
-        self.highlights.iter().for_each(|h| {
-            (xft.XftDrawRect)(
-                draw,
-                &palette.highlight[h.idx],
-                x_start + h.start as c_int,
-                (bar_height - highlight_height) as c_int,
-                (h.end - h.start) as c_uint,
-                highlight_height as c_uint,
-            );
-        });
-        // End of highlight bit.
-        // Do the font bits last.
-        let mut offset = 0;
-        self.text_display.iter().for_each(|td| {
-            let chunk: String = self
-                .text
-                .chars()
-                .skip(td.start)
-                .take(td.end - td.start)
-                .collect();
-            let font = fonts[td.face_idx];
-            let font_colour = palette.font[td.col_idx];
-            (xft.XftDrawStringUtf8)(
-                draw,
-                &font_colour,
-                font,
-                x_start + offset,
-                y_font,
-                chunk.as_bytes().as_ptr() as *const c_uchar,
-                chunk.as_bytes().len() as c_int,
-            );
-            offset += string_pixel_width(xft, dpy, font, &chunk) as c_int;
-        });
-        // End of font bit.
     }
 }

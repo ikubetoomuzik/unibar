@@ -66,7 +66,6 @@ pub struct Bar {
     palette: ColourPalette,
     highlight_height: c_int,
     current_string: ValidString,
-    receiver: mpsc::Receiver<String>,
 }
 
 impl Bar {
@@ -100,7 +99,6 @@ impl Bar {
             palette: ColourPalette::empty(),
             highlight_height: 0,
             current_string: ValidString::empty(),
-            receiver: init!(),
         }
     }
 
@@ -164,8 +162,12 @@ impl Bar {
             xlib::CWBackPixel | xlib::CWColormap | xlib::CWOverrideRedirect | xlib::CWEventMask, // Mask for which attributes are set.
             &mut attributes, // Pointer to the attributes to use.
         );
-
         self.draw = (self.xft.XftDrawCreate)(self.display, self.window_id, self.visual, self.cmap);
+
+        self.set_atoms();
+
+        // Map it up.
+        (self.xlib.XMapWindow)(self.display, self.window_id);
     }
 
     pub unsafe fn event_loop(&mut self) {
@@ -173,10 +175,9 @@ impl Bar {
         let lock = io::stdin();
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || input_loop(lock, tx));
-        self.receiver = rx;
 
         loop {
-            if let Ok(s) = self.receiver.try_recv() {
+            if let Ok(s) = rx.try_recv() {
                 // Small kill marker for when I can't click.
                 if s == "QUIT NOW" {
                     break;

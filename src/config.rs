@@ -1,4 +1,3 @@
-#![allow(dead_code, unused_variables)]
 // Struct to load config from file and cli args.
 // By: Curtis Jones <mail@curtisjones.ca>
 // Started on: September 07, 2020
