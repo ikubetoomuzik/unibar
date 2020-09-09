@@ -7,13 +7,18 @@ use super::{
     config::{BarPos, Config},
     valid_string::{ColourPalette, ValidString},
 };
-use std::{ffi::CString, io, mem, os::raw::*, process, ptr, sync::mpsc, thread};
+use std::{ffi::CString, io, mem, os::raw::*, process, ptr, sync::mpsc, thread, time};
 use x11_dl::{xft, xlib, xrender::XGlyphInfo};
 
 macro_rules! init {
     () => {
         mem::MaybeUninit::uninit().assume_init();
     };
+}
+
+fn wait(time_ms: u64) {
+    let time = time::Duration::from_millis(time_ms);
+    thread::sleep(time);
 }
 
 fn input_loop(stdin: std::io::Stdin, send: mpsc::Sender<String>) {
@@ -198,6 +203,8 @@ impl Bar {
                     break;
                 }
             }
+
+            wait(100);
         }
     }
 
