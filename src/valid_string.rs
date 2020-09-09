@@ -4,7 +4,6 @@
 // Started on: September 07, 2020
 //
 //
-use super::bar::ColourPalette;
 use std::{mem, os::raw::*};
 use x11_dl::{xft, xlib, xrender::XGlyphInfo};
 
@@ -38,6 +37,40 @@ unsafe fn string_pixel_width(
         &mut extents,
     );
     extents.width as u32
+}
+
+pub struct ColourPalette {
+    pub background: Vec<xft::XftColor>,
+    pub highlight: Vec<xft::XftColor>,
+    pub font: Vec<xft::XftColor>,
+}
+
+impl ColourPalette {
+    pub fn empty() -> ColourPalette {
+        ColourPalette {
+            background: Vec::new(),
+            highlight: Vec::new(),
+            font: Vec::new(),
+        }
+    }
+
+    pub unsafe fn destroy(
+        mut self,
+        xft: &xft::Xft,
+        dpy: *mut xlib::Display,
+        cmap: xlib::Colormap,
+        visual: *mut xlib::Visual,
+    ) {
+        self.background
+            .drain(..)
+            .for_each(|mut col| (xft.XftColorFree)(dpy, visual, cmap, &mut col));
+        self.highlight
+            .drain(..)
+            .for_each(|mut col| (xft.XftColorFree)(dpy, visual, cmap, &mut col));
+        self.font
+            .drain(..)
+            .for_each(|mut col| (xft.XftColorFree)(dpy, visual, cmap, &mut col));
+    }
 }
 
 enum IndexType {
@@ -89,10 +122,10 @@ impl DisplayType {
 }
 
 #[derive(Debug)]
-struct BackDisplay {
-    idx: usize,
-    start: usize,
-    end: usize,
+pub struct BackDisplay {
+    pub idx: usize,
+    pub start: usize,
+    pub end: usize,
 }
 
 impl BackDisplay {
@@ -164,10 +197,10 @@ impl BackDisplay {
 }
 
 #[derive(Debug)]
-struct HighDisplay {
-    idx: usize,
-    start: usize,
-    end: usize,
+pub struct HighDisplay {
+    pub idx: usize,
+    pub start: usize,
+    pub end: usize,
 }
 
 impl HighDisplay {
@@ -239,11 +272,11 @@ impl HighDisplay {
 }
 
 #[derive(Debug)]
-struct FontDisplay {
-    face_idx: usize,
-    col_idx: usize,
-    start: usize,
-    end: usize,
+pub struct FontDisplay {
+    pub face_idx: usize,
+    pub col_idx: usize,
+    pub start: usize,
+    pub end: usize,
 }
 
 impl FontDisplay {
@@ -289,14 +322,14 @@ impl FontDisplay {
 
 #[derive(Debug)]
 pub struct ValidString {
-    text: String,
-    text_display: Vec<FontDisplay>,
-    backgrounds: Vec<BackDisplay>,
-    highlights: Vec<HighDisplay>,
+    pub text: String,
+    pub text_display: Vec<FontDisplay>,
+    pub backgrounds: Vec<BackDisplay>,
+    pub highlights: Vec<HighDisplay>,
 }
 
 impl ValidString {
-    fn empty() -> ValidString {
+    pub fn empty() -> ValidString {
         ValidString {
             text: String::new(),
             text_display: Vec::new(),
@@ -487,6 +520,7 @@ impl ValidString {
             highlights,
         }
     }
+
     pub unsafe fn draw(
         &self,
         xft: &xft::Xft,

@@ -8,6 +8,12 @@ use std::{ffi::CString, io::stdin, mem, os::raw::*, process, ptr, sync::mpsc, th
 use unibar::*;
 use x11_dl::{xft, xlib, xrender::XGlyphInfo};
 
+macro_rules! init {
+    () => {
+        mem::MaybeUninit::uninit().assume_init();
+    };
+}
+
 fn wait(time_ms: u64) {
     let time = time::Duration::from_millis(time_ms);
     thread::sleep(time);
@@ -25,7 +31,6 @@ unsafe fn set_atoms(xlib: &xlib::Xlib, dpy: *mut xlib::Display, window: c_ulong)
     // Set the WM_NAME.
     let title = CString::new("Unibar-rs").unwrap();
     (xlib.XStoreName)(dpy, window, title.as_ptr() as *mut c_char);
-
     // Set WM_CLASS
     let class: *mut xlib::XClassHint = (xlib.XAllocClassHint)();
     let cl_names = [
@@ -35,16 +40,14 @@ unsafe fn set_atoms(xlib: &xlib::Xlib, dpy: *mut xlib::Display, window: c_ulong)
     (*class).res_name = cl_names[0].as_ptr() as *mut c_char;
     (*class).res_class = cl_names[1].as_ptr() as *mut c_char;
     (xlib.XSetClassHint)(dpy, window, class);
-
     // Set WM_CLIENT_MACHINE
     let hn_size = libc::sysconf(libc::_SC_HOST_NAME_MAX) as libc::size_t;
     let hn_buffer: *mut c_char = vec![0 as c_char; hn_size].as_mut_ptr();
     libc::gethostname(hn_buffer, hn_size);
     let mut hn_list = [hn_buffer];
-    let mut hn_text_prop: xlib::XTextProperty = mem::MaybeUninit::uninit().assume_init();
+    let mut hn_text_prop: xlib::XTextProperty = init!();
     (xlib.XStringListToTextProperty)(hn_list.as_mut_ptr(), 1, &mut hn_text_prop);
     (xlib.XSetWMClientMachine)(dpy, window, &mut hn_text_prop);
-
     // Set _NET_WM_PID
     let pid = [process::id()].as_ptr();
     let wm_pid_atom = get_atom(&xlib, dpy, "_NET_WM_PID");
@@ -58,7 +61,6 @@ unsafe fn set_atoms(xlib: &xlib::Xlib, dpy: *mut xlib::Display, window: c_ulong)
         pid as *const c_uchar,
         1,
     );
-
     // Set _NET_WM_DESKTOP
     let dk_num = [0xFFFFFFFF as c_ulong].as_ptr();
     let wm_dktp_atom = get_atom(&xlib, dpy, "_NET_WM_DESKTOP");
@@ -72,7 +74,6 @@ unsafe fn set_atoms(xlib: &xlib::Xlib, dpy: *mut xlib::Display, window: c_ulong)
         dk_num as *const c_uchar,
         1,
     );
-
     // Change _NET_WM_STATE
     let wm_state_atom = get_atom(&xlib, dpy, "_NET_WM_STATE");
     let state_atoms = [
@@ -89,7 +90,6 @@ unsafe fn set_atoms(xlib: &xlib::Xlib, dpy: *mut xlib::Display, window: c_ulong)
         state_atoms.as_ptr() as *const c_uchar,
         2,
     );
-
     // Set the _NET_WM_STRUT[_PARTIAL]
     let strut: [c_long; 12] = [0, 0, 32, 0, 0, 0, 0, 0, 0, 1920, 0, 0];
     let strut_atoms = [
@@ -116,7 +116,6 @@ unsafe fn set_atoms(xlib: &xlib::Xlib, dpy: *mut xlib::Display, window: c_ulong)
         strut.as_ptr() as *const c_uchar,
         12,
     );
-
     // Set the _NET_WM_WINDOW_TYPE atom
     let win_type_atom = get_atom(&xlib, dpy, "_NET_WM_WINDOW_TYPE");
     let dock_atom = [get_atom(&xlib, dpy, "_NET_WM_WINDOW_TYPE_DOCK")];
@@ -189,7 +188,7 @@ unsafe fn get_color(
     name: &str,
 ) -> c_ulong {
     let name = CString::new(name).unwrap();
-    let mut temp: xlib::XColor = mem::MaybeUninit::uninit().assume_init();
+    let mut temp: xlib::XColor = init!();
     (xlib.XParseColor)(dpy, cmap, name.as_ptr(), &mut temp);
     (xlib.XAllocColor)(dpy, cmap, &mut temp);
     temp.pixel
@@ -241,7 +240,7 @@ fn main() {
         let backc = get_color(&xlib, dpy, cmap, "#282A36");
 
         // Manually set the attributes here so we can get more fine grain control.
-        let mut attributes: xlib::XSetWindowAttributes = mem::MaybeUninit::uninit().assume_init();
+        let mut attributes: xlib::XSetWindowAttributes = init!();
         attributes.background_pixel = backc;
         attributes.colormap = cmap;
         attributes.override_redirect = xlib::False;
@@ -273,7 +272,7 @@ fn main() {
         (xlib.XMapWindow)(dpy, window);
 
         // Init variables for event loop.
-        let mut event: xlib::XEvent = mem::MaybeUninit::uninit().assume_init();
+        let mut event: xlib::XEvent = init!();
 
         // Test vars
         let fonts = vec![
