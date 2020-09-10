@@ -328,6 +328,19 @@ impl ValidString {
             highlights: Vec::new(),
         }
     }
+
+    pub unsafe fn len(
+        &self,
+        xft: &xft::Xft,
+        dpy: *mut xlib::Display,
+        fonts: &[*mut xft::XftFont],
+    ) -> u32 {
+        self.text_display.iter().fold(0, |acc, fd| {
+            let chunk: String = self.text.chars().take(fd.end).skip(fd.start).collect();
+            acc + string_pixel_width(xft, dpy, fonts[fd.face_idx], &chunk)
+        })
+    }
+
     pub unsafe fn parse_input_string(
         xft: &xft::Xft,
         dpy: *mut xlib::Display,
@@ -383,47 +396,49 @@ impl ValidString {
                         }
                         _ => (),
                     }
-                } else if next_is_index {
-                    if let Some(d) = ch.to_digit(10) {
-                        match index_type {
-                            IndexType::BackgroundColour => {
-                                if d > (colours.background.len() - 1) as u32 {
-                                    println!("Invalid background colour index -- TOO LARGE.");
-                                } else {
-                                    bckgrnd_tmp.2 = count;
-                                    background_vec.push(DisplayType::from(bckgrnd_tmp));
-                                    bckgrnd_tmp = (d as usize, count, 0);
+                } else {
+                    if next_is_index {
+                        if let Some(d) = ch.to_digit(10) {
+                            match index_type {
+                                IndexType::BackgroundColour => {
+                                    if d > (colours.background.len() - 1) as u32 {
+                                        println!("Invalid background colour index -- TOO LARGE.");
+                                    } else {
+                                        bckgrnd_tmp.2 = count;
+                                        background_vec.push(DisplayType::from(bckgrnd_tmp));
+                                        bckgrnd_tmp = (d as usize, count, 0);
+                                    }
+                                }
+                                IndexType::HighlightColour => {
+                                    if d > (colours.highlight.len() - 1) as u32 {
+                                        println!("Invalid highlight colour index -- TOO LARGE.");
+                                    } else {
+                                        highlht_tmp.2 = count;
+                                        highlight_vec.push(DisplayType::from(highlht_tmp));
+                                        highlht_tmp = (d as usize, count, 0);
+                                    }
+                                }
+                                IndexType::FontColour => {
+                                    if d > (colours.font.len() - 1) as u32 {
+                                        println!("Invalid font colour index -- TOO LARGE.");
+                                    } else {
+                                        fcol_tmp.2 = count;
+                                        font_colour_vec.push(DisplayType::from(fcol_tmp));
+                                        fcol_tmp = (d as usize, count, 0);
+                                    }
+                                }
+                                IndexType::FontFace => {
+                                    if d > (fonts.len() - 1) as u32 {
+                                        println!("Invalid font face index -- TOO LARGE.");
+                                    } else {
+                                        fface_tmp.2 = count;
+                                        font_face_vec.push(DisplayType::from(fface_tmp));
+                                        fface_tmp = (d as usize, count, 0);
+                                    }
                                 }
                             }
-                            IndexType::HighlightColour => {
-                                if d > (colours.highlight.len() - 1) as u32 {
-                                    println!("Invalid highlight colour index -- TOO LARGE.");
-                                } else {
-                                    highlht_tmp.2 = count;
-                                    highlight_vec.push(DisplayType::from(highlht_tmp));
-                                    highlht_tmp = (d as usize, count, 0);
-                                }
-                            }
-                            IndexType::FontColour => {
-                                if d > (colours.font.len() - 1) as u32 {
-                                    println!("Invalid font colour index -- TOO LARGE.");
-                                } else {
-                                    fcol_tmp.2 = count;
-                                    font_colour_vec.push(DisplayType::from(fcol_tmp));
-                                    fcol_tmp = (d as usize, count, 0);
-                                }
-                            }
-                            IndexType::FontFace => {
-                                if d > (fonts.len() - 1) as u32 {
-                                    println!("Invalid font face index -- TOO LARGE.");
-                                } else {
-                                    fface_tmp.2 = count;
-                                    font_face_vec.push(DisplayType::from(fface_tmp));
-                                    fface_tmp = (d as usize, count, 0);
-                                }
-                            }
+                            next_is_index = false;
                         }
-                        next_is_index = false;
                     } else {
                         match ch {
                             '/' => closing_block = true,

@@ -71,7 +71,8 @@ pub struct Bar {
     font_y: c_int,
     palette: ColourPalette,
     highlight_height: c_int,
-    current_string: ValidString,
+    left_string: ValidString,
+    right_string: ValidString,
 }
 
 impl Bar {
@@ -110,7 +111,8 @@ impl Bar {
             font_y: 20,
             palette: ColourPalette::empty(),
             highlight_height: 0,
-            current_string: ValidString::empty(),
+            left_string: ValidString::empty(),
+            right_string: ValidString::empty(),
         }
     }
 
@@ -199,15 +201,34 @@ impl Bar {
                 if s == "QUIT NOW" {
                     break;
                 }
-                self.current_string = ValidString::parse_input_string(
-                    &self.xft,
-                    self.display,
-                    &self.fonts,
-                    &self.palette,
-                    s,
-                );
+                if s.contains("<|>") {
+                    let mut s = s.split("<|>");
+                    self.left_string = ValidString::parse_input_string(
+                        &self.xft,
+                        self.display,
+                        &self.fonts,
+                        &self.palette,
+                        s.next().unwrap_or("").to_string(),
+                    );
+                    self.right_string = ValidString::parse_input_string(
+                        &self.xft,
+                        self.display,
+                        &self.fonts,
+                        &self.palette,
+                        s.next().unwrap_or("").to_string(),
+                    );
+                } else {
+                    self.left_string = ValidString::parse_input_string(
+                        &self.xft,
+                        self.display,
+                        &self.fonts,
+                        &self.palette,
+                        s,
+                    );
+                    self.right_string = ValidString::empty();
+                }
                 (self.xlib.XClearWindow)(self.display, self.window_id);
-                self.draw_string();
+                self.draw_display();
             }
 
             if self.poll_events() {
@@ -220,9 +241,9 @@ impl Bar {
         }
     }
 
-    unsafe fn draw_string(&self) {
+    unsafe fn draw_display(&self) {
         // Displaying the backgrounds first.
-        self.current_string.backgrounds.iter().for_each(|b| {
+        self.left_string.backgrounds.iter().for_each(|b| {
             (self.xft.XftDrawRect)(
                 self.draw,
                 &self.palette.background[b.idx],
@@ -234,7 +255,7 @@ impl Bar {
         });
         // End of the background bit.
         // Display the highlights next.
-        self.current_string.highlights.iter().for_each(|h| {
+        self.left_string.highlights.iter().for_each(|h| {
             (self.xft.XftDrawRect)(
                 self.draw,
                 &self.palette.highlight[h.idx],
@@ -247,9 +268,9 @@ impl Bar {
         // End of highlight bit.
         // Do the font bits last.
         let mut offset = 0;
-        self.current_string.text_display.iter().for_each(|td| {
+        self.left_string.text_display.iter().for_each(|td| {
             let chunk: String = self
-                .current_string
+                .left_string
                 .text
                 .chars()
                 .skip(td.start)
@@ -262,6 +283,58 @@ impl Bar {
                 &font_colour,
                 font,
                 self.x + offset,
+                self.font_y,
+                chunk.as_bytes().as_ptr() as *const c_uchar,
+                chunk.as_bytes().len() as c_int,
+            );
+            offset += string_pixel_width(&self.xft, self.display, font, &chunk) as c_int;
+        });
+        // End of font bit.
+        // ------------------------------------------------------------------------------
+        // Now the right string.
+        let start_x =
+            self.width - self.right_string.len(&self.xft, self.display, &self.fonts) as i32;
+        // Displaying the backgrounds first.
+        self.right_string.backgrounds.iter().for_each(|b| {
+            (self.xft.XftDrawRect)(
+                self.draw,
+                &self.palette.background[b.idx],
+                start_x + b.start as c_int,
+                0,
+                (b.end - b.start) as c_uint,
+                self.height as c_uint,
+            );
+        });
+        // End of the background bit.
+        // Display the highlights next.
+        self.right_string.highlights.iter().for_each(|h| {
+            (self.xft.XftDrawRect)(
+                self.draw,
+                &self.palette.highlight[h.idx],
+                start_x + h.start as c_int,
+                (self.height - self.highlight_height) as c_int,
+                (h.end - h.start) as c_uint,
+                self.highlight_height as c_uint,
+            );
+        });
+        // End of highlight bit.
+        // Do the font bits last.
+        let mut offset = 0;
+        self.right_string.text_display.iter().for_each(|td| {
+            let chunk: String = self
+                .right_string
+                .text
+                .chars()
+                .skip(td.start)
+                .take(td.end - td.start)
+                .collect();
+            let font = self.fonts[td.face_idx];
+            let font_colour = self.palette.font[td.col_idx];
+            (self.xft.XftDrawStringUtf8)(
+                self.draw,
+                &font_colour,
+                font,
+                start_x + offset,
                 self.font_y,
                 chunk.as_bytes().as_ptr() as *const c_uchar,
                 chunk.as_bytes().len() as c_int,
