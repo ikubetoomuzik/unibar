@@ -80,6 +80,10 @@ impl Bar {
         let xlib = xlib::Xlib::open().unwrap();
         let xft = xft::Xft::open().unwrap();
         let display = (xlib.XOpenDisplay)(ptr::null());
+        if display.is_null() {
+            println!("Could not connect to display!");
+            std::process::exit(1);
+        }
         let screen = (xlib.XDefaultScreen)(display);
         let root = (xlib.XRootWindow)(display, screen);
         let visual = (xlib.XDefaultVisual)(display, screen);
