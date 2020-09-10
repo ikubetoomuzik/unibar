@@ -9,7 +9,7 @@ use x11_dl::{xft, xlib, xrender::XGlyphInfo};
 unsafe fn default_font_idx(
     xft: &xft::Xft,
     dpy: *mut xlib::Display,
-    fonts: &Vec<*mut xft::XftFont>,
+    fonts: &[*mut xft::XftFont],
     chr: char,
 ) -> usize {
     match fonts
@@ -54,7 +54,7 @@ impl ColourPalette {
     }
 
     pub unsafe fn destroy(
-        mut self,
+        &mut self,
         xft: &xft::Xft,
         dpy: *mut xlib::Display,
         cmap: xlib::Colormap,
@@ -94,8 +94,8 @@ impl DisplayType {
     fn merge_font_faces(mut default: Vec<usize>, explicit: Vec<DisplayType>) -> Vec<DisplayType> {
         explicit.iter().for_each(|dt| {
             if dt.idx != usize::MAX {
-                for i in dt.start..dt.end {
-                    default[i] = dt.idx;
+                for item in default.iter_mut().take(dt.end).skip(dt.start) {
+                    *item = dt.idx;
                 }
             }
         });
@@ -131,16 +131,15 @@ impl BackDisplay {
     unsafe fn gen_list(
         xft: &xft::Xft,
         dpy: *mut xlib::Display,
-        fonts: &Vec<*mut xft::XftFont>,
-        background_objs: &Vec<DisplayType>,
-        text_display: &Vec<FontDisplay>,
+        fonts: &[*mut xft::XftFont],
+        background_objs: &[DisplayType],
+        text_display: &[FontDisplay],
         text: &str,
     ) -> Vec<BackDisplay> {
         background_objs.iter().fold(Vec::new(), |mut acc, back_oj| {
             // Generate the start pixel val.
             let mut start = 0;
-            for i in 0..text_display.len() {
-                let font_display = &text_display[i];
+            for font_display in text_display.iter() {
                 if font_display.start == back_oj.start {
                     break;
                 } else if font_display.end > back_oj.start {
@@ -162,8 +161,7 @@ impl BackDisplay {
             }
             // Generate the end pixel val.
             let mut end = 0;
-            for i in 0..text_display.len() {
-                let font_display = &text_display[i];
+            for font_display in text_display {
                 if font_display.start == back_oj.end {
                     let chunk: String = text.chars().skip(font_display.start).take(1).collect();
                     end += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
@@ -206,16 +204,15 @@ impl HighDisplay {
     unsafe fn gen_list(
         xft: &xft::Xft,
         dpy: *mut xlib::Display,
-        fonts: &Vec<*mut xft::XftFont>,
-        highlight_objs: &Vec<DisplayType>,
-        text_display: &Vec<FontDisplay>,
+        fonts: &[*mut xft::XftFont],
+        highlight_objs: &[DisplayType],
+        text_display: &[FontDisplay],
         text: &str,
     ) -> Vec<HighDisplay> {
         highlight_objs.iter().fold(Vec::new(), |mut acc, high_oj| {
             // Generate the start pixel val.
             let mut start = 0;
-            for i in 0..text_display.len() {
-                let font_display = &text_display[i];
+            for font_display in text_display.iter() {
                 if font_display.start == high_oj.start {
                     break;
                 } else if font_display.end > high_oj.start {
@@ -237,8 +234,7 @@ impl HighDisplay {
             }
             // Generate the end pixel val.
             let mut end = 0;
-            for i in 0..text_display.len() {
-                let font_display = &text_display[i];
+            for font_display in text_display.iter() {
                 if font_display.start == high_oj.end {
                     let chunk: String = text.chars().skip(font_display.start).take(1).collect();
                     end += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
@@ -279,16 +275,12 @@ pub struct FontDisplay {
 }
 
 impl FontDisplay {
-    fn generate_list(
-        col_objs: &Vec<DisplayType>,
-        face_objs: &Vec<DisplayType>,
-    ) -> Vec<FontDisplay> {
+    fn generate_list(col_objs: &[DisplayType], face_objs: &[DisplayType]) -> Vec<FontDisplay> {
         let mut strt_idx = 0;
         col_objs.iter().fold(Vec::new(), |mut acc, cl_oj| {
             let col_idx = cl_oj.idx;
             let mut tmp: Vec<FontDisplay> = Vec::new();
-            for i in strt_idx..face_objs.len() {
-                let fc_oj = &face_objs[i];
+            for (i, fc_oj) in face_objs.iter().enumerate().skip(strt_idx) {
                 let face_idx = fc_oj.idx;
                 let start = if fc_oj.start <= cl_oj.start {
                     cl_oj.start
@@ -339,7 +331,7 @@ impl ValidString {
     pub unsafe fn parse_input_string(
         xft: &xft::Xft,
         dpy: *mut xlib::Display,
-        fonts: &Vec<*mut xft::XftFont>,
+        fonts: &[*mut xft::XftFont],
         colours: &ColourPalette,
         input: String,
     ) -> ValidString {
@@ -391,45 +383,43 @@ impl ValidString {
                         }
                         _ => (),
                     }
-                } else {
-                    if next_is_index {
-                        if let Some(d) = ch.to_digit(10) {
-                            match index_type {
-                                IndexType::BackgroundColour => {
-                                    if d > (colours.background.len() - 1) as u32 {
-                                        println!("Invalid background colour index -- TOO LARGE.");
-                                    } else {
-                                        bckgrnd_tmp.2 = count;
-                                        background_vec.push(DisplayType::from(bckgrnd_tmp));
-                                        bckgrnd_tmp = (d as usize, count, 0);
-                                    }
+                } else if next_is_index {
+                    if let Some(d) = ch.to_digit(10) {
+                        match index_type {
+                            IndexType::BackgroundColour => {
+                                if d > (colours.background.len() - 1) as u32 {
+                                    println!("Invalid background colour index -- TOO LARGE.");
+                                } else {
+                                    bckgrnd_tmp.2 = count;
+                                    background_vec.push(DisplayType::from(bckgrnd_tmp));
+                                    bckgrnd_tmp = (d as usize, count, 0);
                                 }
-                                IndexType::HighlightColour => {
-                                    if d > (colours.highlight.len() - 1) as u32 {
-                                        println!("Invalid highlight colour index -- TOO LARGE.");
-                                    } else {
-                                        highlht_tmp.2 = count;
-                                        highlight_vec.push(DisplayType::from(highlht_tmp));
-                                        highlht_tmp = (d as usize, count, 0);
-                                    }
+                            }
+                            IndexType::HighlightColour => {
+                                if d > (colours.highlight.len() - 1) as u32 {
+                                    println!("Invalid highlight colour index -- TOO LARGE.");
+                                } else {
+                                    highlht_tmp.2 = count;
+                                    highlight_vec.push(DisplayType::from(highlht_tmp));
+                                    highlht_tmp = (d as usize, count, 0);
                                 }
-                                IndexType::FontColour => {
-                                    if d > (colours.font.len() - 1) as u32 {
-                                        println!("Invalid font colour index -- TOO LARGE.");
-                                    } else {
-                                        fcol_tmp.2 = count;
-                                        font_colour_vec.push(DisplayType::from(fcol_tmp));
-                                        fcol_tmp = (d as usize, count, 0);
-                                    }
+                            }
+                            IndexType::FontColour => {
+                                if d > (colours.font.len() - 1) as u32 {
+                                    println!("Invalid font colour index -- TOO LARGE.");
+                                } else {
+                                    fcol_tmp.2 = count;
+                                    font_colour_vec.push(DisplayType::from(fcol_tmp));
+                                    fcol_tmp = (d as usize, count, 0);
                                 }
-                                IndexType::FontFace => {
-                                    if d > (fonts.len() - 1) as u32 {
-                                        println!("Invalid font face index -- TOO LARGE.");
-                                    } else {
-                                        fface_tmp.2 = count;
-                                        font_face_vec.push(DisplayType::from(fface_tmp));
-                                        fface_tmp = (d as usize, count, 0);
-                                    }
+                            }
+                            IndexType::FontFace => {
+                                if d > (fonts.len() - 1) as u32 {
+                                    println!("Invalid font face index -- TOO LARGE.");
+                                } else {
+                                    fface_tmp.2 = count;
+                                    font_face_vec.push(DisplayType::from(fface_tmp));
+                                    fface_tmp = (d as usize, count, 0);
                                 }
                             }
                         }

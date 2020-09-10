@@ -21,8 +21,13 @@ const OPTIONS: [&str; 8] = [
 pub enum BarPos {
     Top,
     Bottom,
-    Left,
-    Right,
+}
+
+pub enum ReplaceOpt {
+    Fonts,
+    FtColours,
+    BgColours,
+    HtColours,
 }
 
 pub struct Config {
@@ -110,8 +115,6 @@ impl Config {
                 "position" => match &val.to_lowercase()[..] {
                     "top" => self.position = BarPos::Top,
                     "bottom" => self.position = BarPos::Bottom,
-                    "left" => self.position = BarPos::Left,
-                    "right" => self.position = BarPos::Right,
                     _ => (),
                 },
                 "size" => {
@@ -131,6 +134,15 @@ impl Config {
                 "highlight_colour" => self.ht_clrs.push(val.to_string()),
                 _ => println!("Invalid option."),
             }
+        }
+    }
+
+    pub fn replace_opt(&mut self, opt: ReplaceOpt, vals: Vec<String>) {
+        match opt {
+            ReplaceOpt::Fonts => self.fonts = vals,
+            ReplaceOpt::FtColours => self.ft_clrs = vals,
+            ReplaceOpt::BgColours => self.bg_clrs = vals,
+            ReplaceOpt::HtColours => self.ht_clrs = vals,
         }
     }
 }

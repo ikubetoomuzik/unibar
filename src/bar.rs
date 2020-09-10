@@ -55,6 +55,7 @@ pub struct Bar {
     xft: xft::Xft,
     display: *mut xlib::Display,
     screen: c_int,
+    position: BarPos,
     x: c_int,
     y: c_int,
     width: c_int,
@@ -74,6 +75,7 @@ pub struct Bar {
 }
 
 impl Bar {
+    /// # Safety
     pub unsafe fn new() -> Bar {
         let xlib = xlib::Xlib::open().unwrap();
         let xft = xft::Xft::open().unwrap();
@@ -88,6 +90,7 @@ impl Bar {
             xft,
             display,
             screen,
+            position: BarPos::Top,
             x: 0,
             y: 0,
             width: 0,
@@ -107,9 +110,11 @@ impl Bar {
         }
     }
 
+    /// # Safety
     pub unsafe fn load_config(&mut self, conf: Config) {
         match conf.position {
-            BarPos::Top | BarPos::Left | BarPos::Right => {
+            BarPos::Top => {
+                self.position = BarPos::Top;
                 self.x = 0;
                 self.y = 0;
                 self.width = (self.xlib.XDisplayWidth)(self.display, self.screen);
@@ -117,6 +122,7 @@ impl Bar {
                 self.height = conf.size;
             }
             BarPos::Bottom => {
+                self.position = BarPos::Bottom;
                 self.x = 0;
                 self.y = (self.xlib.XDisplayHeight)(self.display, self.screen) - conf.size;
                 self.width = (self.xlib.XDisplayWidth)(self.display, self.screen);
@@ -144,6 +150,7 @@ impl Bar {
             .collect();
     }
 
+    /// # Safety
     pub unsafe fn init(&mut self) {
         // Manually set the attributes here so we can get more fine grain control.
         let mut attributes: xlib::XSetWindowAttributes = init!();
@@ -175,6 +182,7 @@ impl Bar {
         (self.xlib.XMapWindow)(self.display, self.window_id);
     }
 
+    /// # Safety
     pub unsafe fn event_loop(&mut self) {
         // Input thread. Has to be seperate to not block xlib events.
         let lock = io::stdin();
@@ -259,43 +267,43 @@ impl Bar {
         // End of font bit.
     }
 
-    pub unsafe fn close(self) {
+    /// # Safety
+    pub unsafe fn close(mut self) {
         self.palette
             .destroy(&self.xft, self.display, self.cmap, self.visual);
         (self.xft.XftDrawDestroy)(self.draw);
+        self.fonts
+            .iter()
+            .for_each(|&f| (self.xft.XftFontClose)(self.display, f));
         (self.xlib.XFreeColormap)(self.display, self.cmap);
         (self.xlib.XDestroyWindow)(self.display, self.window_id);
         (self.xlib.XCloseDisplay)(self.display);
     }
 
     unsafe fn get_atom(&self, name: &str) -> xlib::Atom {
-        (self.xlib.XInternAtom)(
-            self.display,
-            CString::new(name).unwrap().as_ptr() as *const c_char,
-            xlib::False,
-        )
+        let name = CString::new(name).unwrap();
+        (self.xlib.XInternAtom)(self.display, name.as_ptr() as *const c_char, xlib::False)
     }
 
     unsafe fn get_font(&self, name: &str) -> *mut xft::XftFont {
-        let tmp = (self.xft.XftFontOpenName)(
-            self.display,
-            self.screen,
-            CString::new(name).unwrap().as_ptr() as *const c_char,
-        );
+        let name = CString::new(name).unwrap();
+        let tmp =
+            (self.xft.XftFontOpenName)(self.display, self.screen, name.as_ptr() as *const c_char);
         if tmp.is_null() {
-            panic!("Font {} not found!!", name)
+            panic!("Font {} not found!!", name.to_str().unwrap())
         } else {
             tmp
         }
     }
 
     unsafe fn get_xft_colour(&self, name: &str) -> xft::XftColor {
+        let name = CString::new(name).unwrap();
         let mut tmp: xft::XftColor = init!();
         (self.xft.XftColorAllocName)(
             self.display,
             self.visual,
             self.cmap,
-            CString::new(name).unwrap().as_ptr() as *const c_char,
+            name.as_ptr() as *const c_char,
             &mut tmp,
         );
         tmp
