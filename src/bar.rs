@@ -1,4 +1,3 @@
-#![allow(dead_code, unused_variables)]
 // Trying to actually organize this a bit.
 // By: Curtis Jones <git@curtisjones.ca>
 // Started on August 23, 2020
@@ -10,17 +9,21 @@ use super::{
 use std::{ffi::CString, io, mem, os::raw::*, process, ptr, sync::mpsc, thread, time};
 use x11_dl::{xft, xlib, xrender::XGlyphInfo};
 
+/// Alot of the Xlib & Xft functions require pointers to uninitialized variables.
+/// It is very much not in the rust theme but that's the price you pay for using c libraries.
 macro_rules! init {
     () => {
         mem::MaybeUninit::uninit().assume_init();
     };
 }
 
-fn wait(time_ms: u64) {
-    let time = time::Duration::from_millis(time_ms);
-    thread::sleep(time);
-}
-
+/// The function we dump into a seperate thread to wait for any input.
+/// Put in a seperate funtion to make some of the methods cleaner.
+///
+/// # Arguements
+/// * stdin: -> lock on the standard input for the projram.
+/// * send:  -> sender part of an across thread message pipe.
+///
 fn input_loop(stdin: std::io::Stdin, send: mpsc::Sender<String>) {
     loop {
         let mut tmp = String::new();
@@ -33,13 +36,22 @@ fn input_loop(stdin: std::io::Stdin, send: mpsc::Sender<String>) {
     }
 }
 
+/// Utility funtion so get the pixel width of a chunk of characters in a given font.
+/// Returns a u32 with that value.
+///
+/// # Arguements
+/// * xft:   -> reference to the xft lib.
+/// * dpy:   -> pointer to the XDisplay object.
+/// * font   -> pointer to the font we are checking the width of the string in.
+/// * string -> refernce to the string we want the width of.
+///
 unsafe fn string_pixel_width(
     xft: &xft::Xft,
     dpy: *mut xlib::Display,
     font: *mut xft::XftFont,
     string: &str,
 ) -> u32 {
-    let mut extents: XGlyphInfo = mem::MaybeUninit::uninit().assume_init();
+    let mut extents: XGlyphInfo = init!();
     (xft.XftTextExtentsUtf8)(
         dpy,
         font,
@@ -78,11 +90,23 @@ pub struct Bar {
 impl Bar {
     /// # Safety
     pub unsafe fn new() -> Bar {
-        let xlib = xlib::Xlib::open().unwrap();
-        let xft = xft::Xft::open().unwrap();
+        let xlib = match xlib::Xlib::open() {
+            Ok(xlib) => xlib,
+            Err(e) => {
+                eprintln!("Could not connect to xlib library!\nError: {}", e);
+                std::process::exit(1);
+            }
+        };
+        let xft = match xft::Xft::open() {
+            Ok(xft) => xft,
+            Err(e) => {
+                eprintln!("Could not connect to xft library!\nError: {}", e);
+                std::process::exit(1);
+            }
+        };
         let display = (xlib.XOpenDisplay)(ptr::null());
         if display.is_null() {
-            println!("Could not connect to display!");
+            eprintln!("Could not connect to display!");
             std::process::exit(1);
         }
         let screen = (xlib.XDefaultScreen)(display);
@@ -237,7 +261,7 @@ impl Bar {
                 }
             }
 
-            wait(100);
+            thread::sleep(time::Duration::from_millis(100));
         }
     }
 

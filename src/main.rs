@@ -5,7 +5,7 @@
 use unibar::*;
 
 fn main() {
-    let conf = gen_config();
+    let conf = Config::gen_config();
     unsafe {
         let mut bar = Bar::new();
         bar.load_config(conf);
