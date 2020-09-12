@@ -4,23 +4,16 @@
 
 use super::{
     config::{BarPos, Config},
+    init,
     valid_string::{ColourPalette, ValidString},
 };
 use std::{ffi::CString, io, mem, os::raw::*, process, ptr, sync::mpsc, thread, time};
-use x11_dl::{xft, xlib, xrender::XGlyphInfo};
-
-/// Alot of the Xlib & Xft functions require pointers to uninitialized variables.
-/// It is very much not in the rust theme but that's the price you pay for using c libraries.
-macro_rules! init {
-    () => {
-        mem::MaybeUninit::uninit().assume_init();
-    };
-}
+use x11_dl::{xft, xlib};
 
 /// The function we dump into a seperate thread to wait for any input.
 /// Put in a seperate funtion to make some of the methods cleaner.
 ///
-/// # Arguements
+/// # Arguments
 /// * stdin: -> lock on the standard input for the projram.
 /// * send:  -> sender part of an across thread message pipe.
 ///
@@ -34,32 +27,6 @@ fn input_loop(stdin: std::io::Stdin, send: mpsc::Sender<String>) {
             send.send(tmp.trim().to_owned()).unwrap();
         }
     }
-}
-
-/// Utility funtion so get the pixel width of a chunk of characters in a given font.
-/// Returns a u32 with that value.
-///
-/// # Arguements
-/// * xft:   -> reference to the xft lib.
-/// * dpy:   -> pointer to the XDisplay object.
-/// * font   -> pointer to the font we are checking the width of the string in.
-/// * string -> refernce to the string we want the width of.
-///
-unsafe fn string_pixel_width(
-    xft: &xft::Xft,
-    dpy: *mut xlib::Display,
-    font: *mut xft::XftFont,
-    string: &str,
-) -> u32 {
-    let mut extents: XGlyphInfo = init!();
-    (xft.XftTextExtentsUtf8)(
-        dpy,
-        font,
-        string.as_bytes().as_ptr() as *mut c_uchar,
-        string.as_bytes().len() as c_int,
-        &mut extents,
-    );
-    extents.width as u32
 }
 
 pub struct Bar {
@@ -84,6 +51,7 @@ pub struct Bar {
     palette: ColourPalette,
     highlight_height: c_int,
     left_string: ValidString,
+    center_string: ValidString,
     right_string: ValidString,
 }
 
@@ -136,6 +104,7 @@ impl Bar {
             palette: ColourPalette::empty(),
             highlight_height: 0,
             left_string: ValidString::empty(),
+            center_string: ValidString::empty(),
             right_string: ValidString::empty(),
         }
     }
@@ -225,31 +194,60 @@ impl Bar {
                 if s == "QUIT NOW" {
                     break;
                 }
-                if s.contains("<|>") {
-                    let mut s = s.split("<|>");
-                    self.left_string = ValidString::parse_input_string(
-                        &self.xft,
-                        self.display,
-                        &self.fonts,
-                        &self.palette,
-                        s.next().unwrap_or("").to_string(),
-                    );
-                    self.right_string = ValidString::parse_input_string(
-                        &self.xft,
-                        self.display,
-                        &self.fonts,
-                        &self.palette,
-                        s.next().unwrap_or("").to_string(),
-                    );
-                } else {
-                    self.left_string = ValidString::parse_input_string(
-                        &self.xft,
-                        self.display,
-                        &self.fonts,
-                        &self.palette,
-                        s,
-                    );
-                    self.right_string = ValidString::empty();
+                match s.matches("<|>").count() {
+                    0 => {
+                        self.left_string = ValidString::parse_input_string(
+                            &self.xft,
+                            self.display,
+                            &self.fonts,
+                            &self.palette,
+                            &s,
+                        );
+                        self.center_string = ValidString::empty();
+                        self.right_string = ValidString::empty();
+                    }
+                    1 => {
+                        let mut s = s.split("<|>");
+                        self.left_string = ValidString::parse_input_string(
+                            &self.xft,
+                            self.display,
+                            &self.fonts,
+                            &self.palette,
+                            s.next().unwrap_or(""),
+                        );
+                        self.center_string = ValidString::empty();
+                        self.right_string = ValidString::parse_input_string(
+                            &self.xft,
+                            self.display,
+                            &self.fonts,
+                            &self.palette,
+                            s.next().unwrap_or(""),
+                        );
+                    }
+                    _ => {
+                        let mut s = s.split("<|>");
+                        self.left_string = ValidString::parse_input_string(
+                            &self.xft,
+                            self.display,
+                            &self.fonts,
+                            &self.palette,
+                            s.next().unwrap_or(""),
+                        );
+                        self.center_string = ValidString::parse_input_string(
+                            &self.xft,
+                            self.display,
+                            &self.fonts,
+                            &self.palette,
+                            s.next().unwrap_or(""),
+                        );
+                        self.right_string = ValidString::parse_input_string(
+                            &self.xft,
+                            self.display,
+                            &self.fonts,
+                            &self.palette,
+                            s.next().unwrap_or(""),
+                        );
+                    }
                 }
                 (self.xlib.XClearWindow)(self.display, self.window_id);
                 self.draw_display();
@@ -266,106 +264,45 @@ impl Bar {
     }
 
     unsafe fn draw_display(&self) {
-        // Displaying the backgrounds first.
-        self.left_string.backgrounds.iter().for_each(|b| {
-            (self.xft.XftDrawRect)(
-                self.draw,
-                &self.palette.background[b.idx],
-                self.x + b.start as c_int,
-                0,
-                (b.end - b.start) as c_uint,
-                self.height as c_uint,
-            );
-        });
-        // End of the background bit.
-        // Display the highlights next.
-        self.left_string.highlights.iter().for_each(|h| {
-            (self.xft.XftDrawRect)(
-                self.draw,
-                &self.palette.highlight[h.idx],
-                self.x + h.start as c_int,
-                (self.height - self.highlight_height) as c_int,
-                (h.end - h.start) as c_uint,
-                self.highlight_height as c_uint,
-            );
-        });
-        // End of highlight bit.
-        // Do the font bits last.
-        let mut offset = 0;
-        self.left_string.text_display.iter().for_each(|td| {
-            let chunk: String = self
-                .left_string
-                .text
-                .chars()
-                .skip(td.start)
-                .take(td.end - td.start)
-                .collect();
-            let font = self.fonts[td.face_idx];
-            let font_colour = self.palette.font[td.col_idx];
-            (self.xft.XftDrawStringUtf8)(
-                self.draw,
-                &font_colour,
-                font,
-                self.x + offset,
-                self.font_y,
-                chunk.as_bytes().as_ptr() as *const c_uchar,
-                chunk.as_bytes().len() as c_int,
-            );
-            offset += string_pixel_width(&self.xft, self.display, font, &chunk) as c_int;
-        });
-        // End of font bit.
-        // ------------------------------------------------------------------------------
-        // Now the right string.
-        let start_x =
-            self.width - self.right_string.len(&self.xft, self.display, &self.fonts) as i32;
-        // Displaying the backgrounds first.
-        self.right_string.backgrounds.iter().for_each(|b| {
-            (self.xft.XftDrawRect)(
-                self.draw,
-                &self.palette.background[b.idx],
-                start_x + b.start as c_int,
-                0,
-                (b.end - b.start) as c_uint,
-                self.height as c_uint,
-            );
-        });
-        // End of the background bit.
-        // Display the highlights next.
-        self.right_string.highlights.iter().for_each(|h| {
-            (self.xft.XftDrawRect)(
-                self.draw,
-                &self.palette.highlight[h.idx],
-                start_x + h.start as c_int,
-                (self.height - self.highlight_height) as c_int,
-                (h.end - h.start) as c_uint,
-                self.highlight_height as c_uint,
-            );
-        });
-        // End of highlight bit.
-        // Do the font bits last.
-        let mut offset = 0;
-        self.right_string.text_display.iter().for_each(|td| {
-            let chunk: String = self
-                .right_string
-                .text
-                .chars()
-                .skip(td.start)
-                .take(td.end - td.start)
-                .collect();
-            let font = self.fonts[td.face_idx];
-            let font_colour = self.palette.font[td.col_idx];
-            (self.xft.XftDrawStringUtf8)(
-                self.draw,
-                &font_colour,
-                font,
-                start_x + offset,
-                self.font_y,
-                chunk.as_bytes().as_ptr() as *const c_uchar,
-                chunk.as_bytes().len() as c_int,
-            );
-            offset += string_pixel_width(&self.xft, self.display, font, &chunk) as c_int;
-        });
-        // End of font bit.
+        // left string.
+        self.left_string.draw(
+            &self.xft,
+            self.display,
+            self.draw,
+            &self.palette,
+            &self.fonts,
+            self.x,
+            self.font_y,
+            self.height as c_uint,
+            self.highlight_height as c_uint,
+        );
+
+        // center string.
+        self.center_string.draw(
+            &self.xft,
+            self.display,
+            self.draw,
+            &self.palette,
+            &self.fonts,
+            (self.width / 2)
+                - (self.right_string.len(&self.xft, self.display, &self.fonts) as i32 / 2),
+            self.font_y,
+            self.height as c_uint,
+            self.highlight_height as c_uint,
+        );
+
+        // right string.
+        self.right_string.draw(
+            &self.xft,
+            self.display,
+            self.draw,
+            &self.palette,
+            &self.fonts,
+            self.width - self.right_string.len(&self.xft, self.display, &self.fonts) as i32,
+            self.font_y,
+            self.height as c_uint,
+            self.highlight_height as c_uint,
+        );
     }
 
     /// # Safety
