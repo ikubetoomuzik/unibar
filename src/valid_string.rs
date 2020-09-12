@@ -48,13 +48,22 @@ unsafe fn string_pixel_width(
     extents.width as u32
 }
 
+/// Private struct to contain colour information for the status bar.
+/// Simpler than storing seperate fields as individual Vecs.
 pub struct ColourPalette {
+    /// Colours for the background highlight.
     pub background: Vec<xft::XftColor>,
+    /// Colours for the underline highlight.
     pub highlight: Vec<xft::XftColor>,
+    /// Colours for the fonts.
     pub font: Vec<xft::XftColor>,
 }
 
 impl ColourPalette {
+    /// Simple helper function to get an empty ColourPalette object.
+    ///
+    /// # Output
+    /// ColourPalette than can be added to later.
     pub fn empty() -> ColourPalette {
         ColourPalette {
             background: Vec::new(),
@@ -63,6 +72,13 @@ impl ColourPalette {
         }
     }
 
+    /// Simple helper function to free all of the colours contained in seperate vecs.
+    ///
+    /// # Arguments
+    /// * xft:    -> Reference to the Xft library for XftColorFree.
+    /// * dpy:    -> Pointer to the Display that the bar is using.
+    /// * cmap:   -> Pointer to the Colormap for the active Display.
+    /// * visual: -> Pointer to the Visual for the active Display.
     pub unsafe fn destroy(
         &mut self,
         xft: &xft::Xft,
@@ -70,23 +86,19 @@ impl ColourPalette {
         cmap: xlib::Colormap,
         visual: *mut xlib::Visual,
     ) {
+        // Do the background colours first.
         self.background
             .drain(..)
             .for_each(|mut col| (xft.XftColorFree)(dpy, visual, cmap, &mut col));
+        // Next the underline highlight colours.
         self.highlight
             .drain(..)
             .for_each(|mut col| (xft.XftColorFree)(dpy, visual, cmap, &mut col));
+        // Finally we free our font colours.
         self.font
             .drain(..)
             .for_each(|mut col| (xft.XftColorFree)(dpy, visual, cmap, &mut col));
     }
-}
-
-enum IndexType {
-    BackgroundColour,
-    HighlightColour,
-    FontColour,
-    FontFace,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -138,6 +150,20 @@ struct RectDisplayInfo {
 }
 
 impl RectDisplayInfo {
+    /// Function to generate a list of background or underline highlight instructions from the text
+    /// and the text_display instructions.
+    ///
+    /// # Arguments
+    /// * xft: -> Reference to the xft library for the string_pixel_width function.
+    /// * dpy: -> Pointer to the xlib Display for the string_pixel_width function.
+    /// * fonts: -> List of fonts available to use, for the string_pixel_width function.
+    /// * rect_display_types: -> List of DisplayTypes for the backgrounds/highlights we are
+    /// converting.
+    /// * text_display: -> List of reference FontDisplayInfo objects used to get the string chunks.
+    /// * text: -> Actual chars that will be displayed.
+    ///
+    /// # Output
+    /// Returns the converted list of RectDisplayInfo objects for the highlights or backgrounds.
     unsafe fn gen_list(
         xft: &xft::Xft,
         dpy: *mut xlib::Display,
@@ -146,6 +172,7 @@ impl RectDisplayInfo {
         text_display: &[FontDisplayInfo],
         text: &str,
     ) -> Vec<RectDisplayInfo> {
+        // Only need one loop, going over the chars and converting from char indexes to pixel vals.
         rect_display_types
             .iter()
             .fold(Vec::new(), |mut acc, rect_oj| {
@@ -153,8 +180,11 @@ impl RectDisplayInfo {
                 let mut start = 0;
                 for font_display in text_display.iter() {
                     if font_display.start == rect_oj.start {
+                        // If the starts are equal we are done.
                         break;
                     } else if font_display.end > rect_oj.start {
+                        // If the end is larger than our start we can get the width up to our start
+                        // and we are done.
                         let chunk: String = text
                             .chars()
                             .skip(font_display.start)
@@ -163,10 +193,11 @@ impl RectDisplayInfo {
                         start += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
                         break;
                     } else {
+                        // Other wise just add in the pixel withd of the whole font display.
                         let chunk: String = text
                             .chars()
+                            .take(font_display.end)
                             .skip(font_display.start)
-                            .take(font_display.end - font_display.start)
                             .collect();
                         start += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
                     }
@@ -175,10 +206,13 @@ impl RectDisplayInfo {
                 let mut end = 0;
                 for font_display in text_display.iter() {
                     if font_display.start == rect_oj.end {
+                        // If the start matches our end we grab one char width and we are done.
                         let chunk: String = text.chars().skip(font_display.start).take(1).collect();
                         end += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
                         break;
                     } else if font_display.end <= rect_oj.end {
+                        // If the ends match or the objects is less than ours we get the width of
+                        // the whole font object in pixels.
                         let chunk: String = text
                             .chars()
                             .take(font_display.end)
@@ -186,6 +220,8 @@ impl RectDisplayInfo {
                             .collect();
                         end += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
                     } else {
+                        // Otherwise we just get the width up to the end value our our object and
+                        // convert it to pixels and finish up.
                         let chunk: String = text
                             .chars()
                             .skip(font_display.start)
@@ -195,6 +231,8 @@ impl RectDisplayInfo {
                         break;
                     }
                 }
+                // Once we have our start and end vals moved to pixels we can make the
+                // RectDisplayInfo object with the idx from the current ref val.
                 acc.push(RectDisplayInfo {
                     idx: rect_oj.idx,
                     start: start as usize,
@@ -273,6 +311,14 @@ impl FontDisplayInfo {
             acc
         })
     }
+}
+
+/// Small private enum to help when parsing the inital input.
+enum IndexType {
+    BackgroundColour,
+    HighlightColour,
+    FontColour,
+    FontFace,
 }
 
 #[derive(Debug)]

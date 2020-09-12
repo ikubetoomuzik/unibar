@@ -65,13 +65,14 @@ impl Config {
         (@arg CONFIG: -c --config +takes_value "Sets a custom config file")
         (@arg POSITION: -p --position  +takes_value "overrides config file position option")
         (@arg SIZE: -s --size  +takes_value "overrides config file bar size option")
-        (@arg FONTS: -f --fonts +multiple +takes_value "overrides config file font options")
+        (@arg FONTS: -f --fonts ... +takes_value "overrides config file font options")
         (@arg DEF_BACKGROUND: -b --background +takes_value "overrides config file default background")
-        (@arg FT_COLOURS: -F --ftcolours +multiple +takes_value "overrides config file font colours")
-        (@arg BG_COLOURS: -B --bgcolours +multiple +takes_value "overrides config file background highlight colours")
-        (@arg HT_COLOURS: -H --htcolours +multiple +takes_value "overrides config file underline highlight colours")
+        (@arg FT_COLOURS: -F --ftcolours ... +takes_value "overrides config file font colours")
+        (@arg BG_COLOURS: -B --bgcolours ... +takes_value "overrides config file background highlight colours")
+        (@arg HT_COLOURS: -H --htcolours ... +takes_value "overrides config file underline highlight colours")
         (@arg UNDERLINE: -u --underline  +takes_value "overrides config file underline size option")
     )
+    .setting(clap::AppSettings::ColoredHelp)
     .get_matches();
         let default_conf = match config_dir() {
             Some(mut d) => {
