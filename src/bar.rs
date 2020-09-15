@@ -5,7 +5,7 @@
 use super::{
     config::{BarPos, Config},
     init,
-    valid_string::{ColourPalette, ValidString},
+    input::{ColourPalette, Input},
 };
 use std::{ffi::CString, io, mem, os::raw::*, process, ptr, sync::mpsc, thread, time};
 use x11_dl::{xft, xlib};
@@ -50,9 +50,9 @@ pub struct Bar {
     font_y: c_int,
     palette: ColourPalette,
     highlight_height: c_int,
-    left_string: ValidString,
-    center_string: ValidString,
-    right_string: ValidString,
+    left_string: Input,
+    center_string: Input,
+    right_string: Input,
 }
 
 impl Bar {
@@ -103,9 +103,9 @@ impl Bar {
             font_y: 20,
             palette: ColourPalette::empty(),
             highlight_height: 0,
-            left_string: ValidString::empty(),
-            center_string: ValidString::empty(),
-            right_string: ValidString::empty(),
+            left_string: Input::empty(),
+            center_string: Input::empty(),
+            right_string: Input::empty(),
         }
     }
 
@@ -125,10 +125,49 @@ impl Bar {
                 self.x = 0;
                 self.y = (self.xlib.XDisplayHeight)(self.display, self.screen) - conf.size;
                 self.width = (self.xlib.XDisplayWidth)(self.display, self.screen);
-                self.width = if self.width > 1920 { 1920 } else { self.width };
                 self.height = conf.size;
             }
         }
+
+        // TODO -> add choice of monitor.
+        // xinerama stuff
+        match x11_dl::xinerama::Xlib::open() {
+            Ok(xin) => {
+                // Grab another copy of the XDisplay. Because the Xinerama methods change the pointer
+                // and causes the close to seg fault.
+                let dpy = (self.xlib.XOpenDisplay)(ptr::null());
+                // Even if we have connected to the library that doesn't necessarily mean that Xinerama
+                // is active. So we make another check here.
+                match (xin.XineramaIsActive)(dpy) {
+                    // Old school c bool where 0 is false and anything else is true.
+                    0 => {
+                        eprintln!("Xinerama is not currently active -- using full XDisplay width.")
+                    }
+                    _ => {
+                        // Temp var because the query strings funtion needs a pointer to a c_int.
+                        let mut num_scr = 0;
+                        // Gets a dumb mutable pointer to an array of ScreenInfo objects for each screen.
+                        let scrns = (xin.XineramaQueryScreens)(dpy, &mut num_scr);
+                        // Using pointer arithmetic and the num_scr variable from the previous function we
+                        // fold the range into a Vec of ScreenInfo objects.
+                        let scrns = (0..num_scr as usize).fold(Vec::new(), |mut acc, i| {
+                            acc.push(*scrns.add(i));
+                            acc
+                        });
+                        // For now we are just setting the x & width to the x & width of the first screen.
+                        self.x = scrns[0].x_org as c_int;
+                        self.width = scrns[0].width as c_int;
+                    }
+                }
+                // Close out the temp display we opened.
+                (self.xlib.XCloseDisplay)(dpy);
+            }
+            Err(e) => eprintln!(
+                "Could not connect to Xinerama lib -- using full XDisplay width.\n{}",
+                e
+            ),
+        }
+
         self.highlight_height = conf.hlt_size;
         self.fonts = conf.fonts.iter().map(|fs| self.get_font(fs)).collect();
         self.back_colour = self.get_xlib_color(&conf.back_color);
@@ -164,8 +203,8 @@ impl Bar {
             self.root,                   // Parent window.
             self.x,                      // X position (from top-left.
             self.y,                      // Y position (from top-left.
-            self.width as u32,           // Length of the bar in x direction.
-            self.height as u32,          // Height of the bar in y direction.
+            self.width as c_uint,        // Length of the bar in x direction.
+            self.height as c_uint,       // Height of the bar in y direction.
             0,                           // Border-width.
             xlib::CopyFromParent,        // Window depth.
             xlib::InputOutput as c_uint, // Window class.
@@ -196,27 +235,27 @@ impl Bar {
                 }
                 match s.matches("<|>").count() {
                     0 => {
-                        self.left_string = ValidString::parse_input_string(
+                        self.left_string = Input::parse_string(
                             &self.xft,
                             self.display,
                             &self.fonts,
                             &self.palette,
                             &s,
                         );
-                        self.center_string = ValidString::empty();
-                        self.right_string = ValidString::empty();
+                        self.center_string = Input::empty();
+                        self.right_string = Input::empty();
                     }
                     1 => {
                         let mut s = s.split("<|>");
-                        self.left_string = ValidString::parse_input_string(
+                        self.left_string = Input::parse_string(
                             &self.xft,
                             self.display,
                             &self.fonts,
                             &self.palette,
                             s.next().unwrap_or(""),
                         );
-                        self.center_string = ValidString::empty();
-                        self.right_string = ValidString::parse_input_string(
+                        self.center_string = Input::empty();
+                        self.right_string = Input::parse_string(
                             &self.xft,
                             self.display,
                             &self.fonts,
@@ -226,21 +265,21 @@ impl Bar {
                     }
                     _ => {
                         let mut s = s.split("<|>");
-                        self.left_string = ValidString::parse_input_string(
+                        self.left_string = Input::parse_string(
                             &self.xft,
                             self.display,
                             &self.fonts,
                             &self.palette,
                             s.next().unwrap_or(""),
                         );
-                        self.center_string = ValidString::parse_input_string(
+                        self.center_string = Input::parse_string(
                             &self.xft,
                             self.display,
                             &self.fonts,
                             &self.palette,
                             s.next().unwrap_or(""),
                         );
-                        self.right_string = ValidString::parse_input_string(
+                        self.right_string = Input::parse_string(
                             &self.xft,
                             self.display,
                             &self.fonts,
@@ -285,7 +324,7 @@ impl Bar {
             &self.palette,
             &self.fonts,
             (self.width / 2)
-                - (self.right_string.len(&self.xft, self.display, &self.fonts) as i32 / 2),
+                - (self.right_string.len(&self.xft, self.display, &self.fonts) as c_int / 2),
             self.font_y,
             self.height as c_uint,
             self.highlight_height as c_uint,
@@ -298,7 +337,7 @@ impl Bar {
             self.draw,
             &self.palette,
             &self.fonts,
-            self.width - self.right_string.len(&self.xft, self.display, &self.fonts) as i32,
+            self.width - self.right_string.len(&self.xft, self.display, &self.fonts) as c_int,
             self.font_y,
             self.height as c_uint,
             self.highlight_height as c_uint,

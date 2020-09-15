@@ -15,7 +15,7 @@ macro_rules! init {
 
 mod bar;
 mod config;
-mod valid_string;
+mod input;
 
 pub use bar::Bar;
 pub use config::Config;

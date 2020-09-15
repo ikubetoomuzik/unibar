@@ -2,28 +2,36 @@
 // By: Curtis Jones <mail@curtisjones.ca>
 // Started on: September 07, 2020
 //
-//
+
 use super::init;
-use std::{mem, os::raw::*};
+use std::{collections::HashMap, mem, os::raw::*};
 use x11_dl::{xft, xlib, xrender::XGlyphInfo};
 
+/// Utility funtion so get the index of the first font that has a glyph for the provided char.
+///
+/// # Arguments
+/// * xft:   -> reference to the xft lib.
+/// * dpy:   -> pointer to the XDisplay object.
+/// * fonts: -> list of fonts available to the bar.
+/// * chr:   -> character we are checking.
+///
+/// # Output
+/// Index of the default font in the Bar.fonts field as a usize.
 unsafe fn default_font_idx(
     xft: &xft::Xft,
     dpy: *mut xlib::Display,
     fonts: &[*mut xft::XftFont],
     chr: char,
 ) -> usize {
-    match fonts
+    fonts
         .iter()
+        // Get the position of the first font with a glyph for chr.
         .position(|&f| (xft.XftCharExists)(dpy, f, chr as c_uint) > 0)
-    {
-        Some(i) => i,
-        None => 0,
-    }
+        // If none are found then we default to 0.
+        .unwrap_or(0)
 }
 
 /// Utility funtion so get the pixel width of a chunk of characters in a given font.
-/// Returns a u32 with that value.
 ///
 /// # Arguments
 /// * xft:   -> reference to the xft lib.
@@ -31,13 +39,20 @@ unsafe fn default_font_idx(
 /// * font   -> pointer to the font we are checking the width of the string in.
 /// * string -> refernce to the string we want the width of.
 ///
+/// # Output
+/// Returns a c_uint representing the pixel with of the <string> arg.
 unsafe fn string_pixel_width(
     xft: &xft::Xft,
     dpy: *mut xlib::Display,
     font: *mut xft::XftFont,
     string: &str,
-) -> u32 {
+) -> c_uint {
+    // Rust gets mad if you don't initialize a variable before providing it as a function arg so we
+    // lie to the rust compiler.
     let mut extents: XGlyphInfo = init!();
+
+    // Getting just so much info about the glyphs to be printed for the string arg when using the
+    // font provided.
     (xft.XftTextExtentsUtf8)(
         dpy,
         font,
@@ -45,7 +60,9 @@ unsafe fn string_pixel_width(
         string.as_bytes().len() as c_int,
         &mut extents,
     );
-    extents.width as u32
+
+    // All that nice info and we just need the width.
+    extents.width as c_uint
 }
 
 /// Private struct to contain colour information for the status bar.
@@ -102,50 +119,114 @@ impl ColourPalette {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct DisplayType {
+/// Private struct to use instead of a tuple of usize vals. Just helps to make things more explicit
+/// during parsing of inputs. Used for font colours and faces, as well as background and underline
+/// highlights.
+struct DisplayTemp {
+    /// Index into the vector of available fonts or colours.
     idx: usize,
+    /// Start character within the parsed input string.
     start: usize,
+    /// End character within the parsed input string.
     end: usize,
 }
 
-impl DisplayType {
-    fn from(inp: (usize, usize, usize)) -> DisplayType {
-        let (idx, start, end) = inp;
-        DisplayType { idx, start, end }
+impl DisplayTemp {
+    /// Some pathological need I have for constructors is being filled here I guess.
+    ///
+    /// # Arguments
+    /// * idx:   -> see struct def.
+    /// * start: -> see struct def.
+    /// * end:   -> see struct def.
+    ///
+    /// # Output
+    /// DisplayTemp that has the values provided in the arguements.
+    fn from(idx: usize, start: usize, end: usize) -> DisplayTemp {
+        DisplayTemp { idx, start, end }
     }
-    fn merge_font_faces(mut default: Vec<usize>, explicit: Vec<DisplayType>) -> Vec<DisplayType> {
-        explicit.iter().for_each(|dt| {
-            if dt.idx != usize::MAX {
-                for item in default.iter_mut().take(dt.end).skip(dt.start) {
-                    *item = dt.idx;
+
+    /// The parsing function when reading in font faces doesn't check for the default font that
+    /// each char belongs to. So this function sorts through and checks for only the sections that
+    /// were not previously explicitly set.
+    ///
+    /// # Arguments
+    /// def: -> reference to a HashMap that is acting like a lookup table for the default face
+    /// index for each char.
+    /// expl: -> reference to the explicitly set font face values from the parse. With usize::MAX
+    /// set for the sections to be filled in.
+    /// text: -> the actual printed text for the Input to be made.
+    ///
+    /// # Output
+    /// A vec of DisplayTemp representing the font_faces for the Input.
+    fn default_font_faces(
+        def: &HashMap<char, usize>,
+        expl: &[DisplayTemp],
+        text: &str,
+    ) -> Vec<DisplayTemp> {
+        expl.iter().fold(Vec::new(), |mut acc, dt| {
+            // usize::MAX is our key value to mean use default here.
+            if dt.idx == usize::MAX {
+                // Get the parts of the string within the DisplayTemp start and end.
+                let chunk: String = text.chars().take(dt.end).skip(dt.start).collect();
+
+                // Temp value to use while counting.
+                let mut tmp = DisplayTemp::from(0, dt.start, dt.start);
+
+                // Generating the Vec of DisplayTemp values by folding over the chars.
+                let mut res = chunk.chars().fold(Vec::new(), |mut ac, ch| {
+                    // Get a copy of the default index for the char
+                    let ch_idx = def.get(&ch).unwrap().clone();
+
+                    // If the default index is different from the tmp val index then we push our
+                    // tmp and start the new count.
+                    if ch_idx != tmp.idx {
+                        // We only do the push if we actually counted something. Otherwise just
+                        // start over by changing the font index.
+                        if tmp.start != tmp.end {
+                            ac.push(tmp);
+                            tmp.start = tmp.end;
+                            tmp.end = tmp.start + 1;
+                        }
+                        tmp.idx = ch_idx;
+                    } else {
+                        // If the default is the same as the idx for our tmp val then we just increment
+                        // the end value.
+                        tmp.end += 1;
+                    }
+
+                    // Gotta return something every loop.
+                    ac
+                });
+
+                // Once the loop is done we push the tmp value on the end if it counted and
+                // characters.
+                if tmp.start != tmp.end {
+                    res.push(tmp);
                 }
+
+                // We use append here because it is possible to have generated multiple
+                // DisplayTemps when using the default indexes.
+                acc.append(&mut res);
+            } else {
+                // If we are not using the defaults then we just push the value.
+                acc.push(*dt);
             }
-        });
-        let mut tmp: (usize, usize, usize) = (0, 0, 0);
-        let mut count = 0;
-        let mut result = default.iter().fold(Vec::new(), |mut acc, &i| {
-            if i != tmp.0 {
-                if count > 0 {
-                    tmp.2 = count;
-                    acc.push(DisplayType::from(tmp));
-                }
-                tmp = (i, count, 0);
-            }
-            count += 1;
+
+            // Once we pushed the old DisplayTemp or generated default ones we return our acc Vec.
             acc
-        });
-        if count - tmp.1 > 0 {
-            tmp.2 = count;
-            result.push(DisplayType::from(tmp));
-        }
-        result
+        })
     }
 }
 
 #[derive(Debug)]
+/// Private struct to contain display info for the underline and background highlight objects.
+/// No reason to have different structs as they would just end up repeating code.
 struct RectDisplayInfo {
+    /// Index into the ColourPalette.{background or highlight} vectors of colours for this section.
     idx: usize,
+    /// Pixel x-value to start.
     start: usize,
+    /// Pixel x-value to end.
     end: usize,
 }
 
@@ -157,7 +238,7 @@ impl RectDisplayInfo {
     /// * xft: -> Reference to the xft library for the string_pixel_width function.
     /// * dpy: -> Pointer to the xlib Display for the string_pixel_width function.
     /// * fonts: -> List of fonts available to use, for the string_pixel_width function.
-    /// * rect_display_types: -> List of DisplayTypes for the backgrounds/highlights we are
+    /// * rect_display_types: -> List of DisplayTemps for the backgrounds/highlights we are
     /// converting.
     /// * text_display: -> List of reference FontDisplayInfo objects used to get the string chunks.
     /// * text: -> Actual chars that will be displayed.
@@ -168,7 +249,7 @@ impl RectDisplayInfo {
         xft: &xft::Xft,
         dpy: *mut xlib::Display,
         fonts: &[*mut xft::XftFont],
-        rect_display_types: &[DisplayType],
+        rect_display_types: &[DisplayTemp],
         text_display: &[FontDisplayInfo],
         text: &str,
     ) -> Vec<RectDisplayInfo> {
@@ -244,7 +325,7 @@ impl RectDisplayInfo {
 }
 
 #[derive(Debug)]
-/// Private struct used to hold the data for drawing the text of a ValidString to the display.
+/// Private struct used to hold the data for drawing the text of a Input to the display.
 struct FontDisplayInfo {
     /// Index in the faces field of a Bar struct to be used.
     face_idx: usize,
@@ -269,7 +350,7 @@ impl FontDisplayInfo {
     /// # Output
     /// List of instructions for both font colour and font face to use. Seperated into the minimum
     /// different sets of instructions to use.
-    fn generate_list(col_objs: &[DisplayType], face_objs: &[DisplayType]) -> Vec<FontDisplayInfo> {
+    fn generate_list(col_objs: &[DisplayTemp], face_objs: &[DisplayTemp]) -> Vec<FontDisplayInfo> {
         let mut strt_idx = 0;
         // Loop through the color objects and for each one generate the mixed FontDisplayInfo
         // object until the start of the face object is larger than the start of the colour object.
@@ -324,7 +405,7 @@ enum IndexType {
 #[derive(Debug)]
 /// Main struct to hold display info for text on the bar.
 /// Has references needed to display the text, backgrounds, and highlights.
-pub struct ValidString {
+pub struct Input {
     /// The actual text to be drawn.
     text: String,
     /// Reference for which chars to display in which font or colour.
@@ -335,13 +416,13 @@ pub struct ValidString {
     highlights: Vec<RectDisplayInfo>,
 }
 
-impl ValidString {
-    /// Small helper function to generate an emply ValidString.
+impl Input {
+    /// Small helper function to generate an emply Input.
     ///
     /// # Output
-    /// Empty ValidString object to use as placeholder.
-    pub fn empty() -> ValidString {
-        ValidString {
+    /// Empty Input object to use as placeholder.
+    pub fn empty() -> Input {
+        Input {
             text: String::new(),
             text_display: Vec::new(),
             backgrounds: Vec::new(),
@@ -415,7 +496,7 @@ impl ValidString {
         });
     }
 
-    /// Small helper function to get the pixel length of a ValidString object.
+    /// Small helper function to get the pixel length of a Input object.
     ///
     /// # Arguments
     /// * xft:   -> reference to the link to the Xft library.
@@ -423,20 +504,20 @@ impl ValidString {
     /// * fonts: -> list of pointers to our XftFont objects available to use.
     ///
     /// # Output
-    /// u32 representing the pixel length of the self ValidString.
+    /// c_uint representing the pixel length of the self Input.
     pub unsafe fn len(
         &self,
         xft: &xft::Xft,
         dpy: *mut xlib::Display,
         fonts: &[*mut xft::XftFont],
-    ) -> u32 {
+    ) -> c_uint {
         self.text_display.iter().fold(0, |acc, fd| {
             let chunk: String = self.text.chars().take(fd.end).skip(fd.start).collect();
             acc + string_pixel_width(xft, dpy, fonts[fd.face_idx], &chunk)
         })
     }
 
-    /// Function to parse a string and develop a ValidString.
+    /// Function to parse a string and develop a Input.
     /// Tries to do most of it's work in one loop over the input.
     ///
     /// # Arguments
@@ -444,17 +525,17 @@ impl ValidString {
     /// * dpy:     -> pointer to the XDisplay object we are displaying to.
     /// * fonts:   -> list of pointers to our XftFont objects available to use.
     /// * colours: -> reference to the ColourPalette available to use.
-    /// * input:   -> the string we are reading from to develop a ValidString.
+    /// * input:   -> the string we are reading from to develop a Input.
     ///
     /// # Output
-    /// ValidString made based on the input String object.
-    pub fn parse_input_string(
+    /// Input made based on the input String object.
+    pub fn parse_string(
         xft: &xft::Xft,
         dpy: *mut xlib::Display,
         fonts: &[*mut xft::XftFont],
         colours: &ColourPalette,
         input: &str,
-    ) -> ValidString {
+    ) -> Input {
         // Loop vars.
         let mut in_format_block = false;
         let mut next_is_index = false;
@@ -463,18 +544,18 @@ impl ValidString {
 
         // Result vars.
         let mut text = String::new();
-        let mut background_vec: Vec<DisplayType> = Vec::new();
-        let mut highlight_vec: Vec<DisplayType> = Vec::new();
-        let mut font_colour_vec: Vec<DisplayType> = Vec::new();
-        let mut font_face_vec: Vec<DisplayType> = Vec::new();
-        let mut default_font_faces: Vec<usize> = Vec::new();
+        let mut background_vec: Vec<DisplayTemp> = Vec::new();
+        let mut highlight_vec: Vec<DisplayTemp> = Vec::new();
+        let mut font_colour_vec: Vec<DisplayTemp> = Vec::new();
+        let mut font_face_vec: Vec<DisplayTemp> = Vec::new();
+        let mut def_font_map: HashMap<char, usize> = HashMap::new();
 
         // Temp vars.
         let mut count: usize = 0;
-        let mut bckgrnd_tmp: (usize, usize, usize) = (usize::MAX, 0, 0);
-        let mut highlht_tmp: (usize, usize, usize) = (usize::MAX, 0, 0);
-        let mut fcol_tmp: (usize, usize, usize) = (0, 0, 0);
-        let mut fface_tmp: (usize, usize, usize) = (usize::MAX, 0, 0);
+        let mut bckgrnd_tmp: DisplayTemp = DisplayTemp::from(usize::MAX, 0, 0);
+        let mut highlht_tmp: DisplayTemp = DisplayTemp::from(usize::MAX, 0, 0);
+        let mut fcol_tmp: DisplayTemp = DisplayTemp::from(0, 0, 0);
+        let mut fface_tmp: DisplayTemp = DisplayTemp::from(usize::MAX, 0, 0);
 
         // Big ass loop to proces the input.
         for ch in input.chars() {
@@ -483,27 +564,27 @@ impl ValidString {
                     match ch {
                         // B is the marker for the background highlight.
                         'B' => {
-                            bckgrnd_tmp.2 = count;
-                            background_vec.push(DisplayType::from(bckgrnd_tmp));
-                            bckgrnd_tmp = (usize::MAX, count, 0);
+                            bckgrnd_tmp.end = count;
+                            background_vec.push(bckgrnd_tmp);
+                            bckgrnd_tmp = DisplayTemp::from(usize::MAX, count, 0);
                         }
                         // H is the marker for the underline highlight.
                         'H' => {
-                            highlht_tmp.2 = count;
-                            highlight_vec.push(DisplayType::from(highlht_tmp));
-                            highlht_tmp = (usize::MAX, count, 0);
+                            highlht_tmp.end = count;
+                            highlight_vec.push(highlht_tmp);
+                            highlht_tmp = DisplayTemp::from(usize::MAX, count, 0);
                         }
                         // F is the marker for the font colour.
                         'F' => {
-                            fcol_tmp.2 = count;
-                            font_colour_vec.push(DisplayType::from(fcol_tmp));
-                            fcol_tmp = (0, count, 0);
+                            fcol_tmp.end = count;
+                            font_colour_vec.push(fcol_tmp);
+                            fcol_tmp = DisplayTemp::from(0, count, 0);
                         }
                         // F is the marker for the font face.
                         'f' => {
-                            fface_tmp.2 = count;
-                            font_face_vec.push(DisplayType::from(fface_tmp));
-                            fface_tmp = (usize::MAX, count, 0);
+                            fface_tmp.end = count;
+                            font_face_vec.push(fface_tmp);
+                            fface_tmp = DisplayTemp::from(usize::MAX, count, 0);
                         }
                         // End the block if we hit a close bracket.
                         '}' => {
@@ -523,39 +604,39 @@ impl ValidString {
                         // start a new tmp count.
                         match index_type {
                             IndexType::BackgroundColour => {
-                                if d > (colours.background.len() - 1) as u32 {
+                                if d > (colours.background.len() - 1) as c_uint {
                                     eprintln!("Invalid background colour index -- TOO LARGE.");
                                 } else {
-                                    bckgrnd_tmp.2 = count;
-                                    background_vec.push(DisplayType::from(bckgrnd_tmp));
-                                    bckgrnd_tmp = (d as usize, count, 0);
+                                    bckgrnd_tmp.end = count;
+                                    background_vec.push(bckgrnd_tmp);
+                                    bckgrnd_tmp = DisplayTemp::from(d as usize, count, 0);
                                 }
                             }
                             IndexType::HighlightColour => {
-                                if d > (colours.highlight.len() - 1) as u32 {
+                                if d > (colours.highlight.len() - 1) as c_uint {
                                     eprintln!("Invalid highlight colour index -- TOO LARGE.");
                                 } else {
-                                    highlht_tmp.2 = count;
-                                    highlight_vec.push(DisplayType::from(highlht_tmp));
-                                    highlht_tmp = (d as usize, count, 0);
+                                    highlht_tmp.end = count;
+                                    highlight_vec.push(highlht_tmp);
+                                    highlht_tmp = DisplayTemp::from(d as usize, count, 0);
                                 }
                             }
                             IndexType::FontColour => {
-                                if d > (colours.font.len() - 1) as u32 {
+                                if d > (colours.font.len() - 1) as c_uint {
                                     eprintln!("Invalid font colour index -- TOO LARGE.");
                                 } else {
-                                    fcol_tmp.2 = count;
-                                    font_colour_vec.push(DisplayType::from(fcol_tmp));
-                                    fcol_tmp = (d as usize, count, 0);
+                                    fcol_tmp.end = count;
+                                    font_colour_vec.push(fcol_tmp);
+                                    fcol_tmp = DisplayTemp::from(d as usize, count, 0);
                                 }
                             }
                             IndexType::FontFace => {
-                                if d > (fonts.len() - 1) as u32 {
+                                if d > (fonts.len() - 1) as c_uint {
                                     eprintln!("Invalid font face index -- TOO LARGE.");
                                 } else {
-                                    fface_tmp.2 = count;
-                                    font_face_vec.push(DisplayType::from(fface_tmp));
-                                    fface_tmp = (d as usize, count, 0);
+                                    fface_tmp.end = count;
+                                    font_face_vec.push(fface_tmp);
+                                    fface_tmp = DisplayTemp::from(d as usize, count, 0);
                                 }
                             }
                         }
@@ -596,8 +677,10 @@ impl ValidString {
                     _ => {
                         count += 1;
                         text.push(ch);
-                        unsafe {
-                            default_font_faces.push(default_font_idx(&xft, dpy, fonts, ch));
+                        if !def_font_map.contains_key(&ch) {
+                            unsafe {
+                                def_font_map.insert(ch, default_font_idx(xft, dpy, fonts, ch));
+                            }
                         }
                     }
                 }
@@ -605,27 +688,27 @@ impl ValidString {
         }
 
         // Set the end of the tmp var to the end count to finish off the tmp vars.
-        bckgrnd_tmp.2 = count;
-        highlht_tmp.2 = count;
-        fcol_tmp.2 = count;
-        fface_tmp.2 = count;
+        bckgrnd_tmp.end = count;
+        highlht_tmp.end = count;
+        fcol_tmp.end = count;
+        fface_tmp.end = count;
 
         // Push the last val onto all of our count vecs.
-        if bckgrnd_tmp.2 - bckgrnd_tmp.1 != 0 {
-            background_vec.push(DisplayType::from(bckgrnd_tmp));
+        if bckgrnd_tmp.end != bckgrnd_tmp.start {
+            background_vec.push(bckgrnd_tmp);
         }
-        if highlht_tmp.2 - highlht_tmp.1 != 0 {
-            highlight_vec.push(DisplayType::from(highlht_tmp));
+        if highlht_tmp.end != highlht_tmp.start {
+            highlight_vec.push(highlht_tmp);
         }
-        if fcol_tmp.2 - fcol_tmp.1 != 0 {
-            font_colour_vec.push(DisplayType::from(fcol_tmp));
+        if fcol_tmp.end != fcol_tmp.start {
+            font_colour_vec.push(fcol_tmp);
         }
-        if fface_tmp.2 - fface_tmp.1 != 0 {
-            font_face_vec.push(DisplayType::from(fface_tmp));
+        if fface_tmp.end != fface_tmp.start {
+            font_face_vec.push(fface_tmp);
         }
 
         // usize::MAX is our default value we need to get rid of it from background vec.
-        let background_vec: Vec<DisplayType> = background_vec
+        let background_vec: Vec<DisplayTemp> = background_vec
             .iter()
             .filter_map(|&bk_oj| {
                 if bk_oj.idx != usize::MAX {
@@ -637,7 +720,7 @@ impl ValidString {
             .collect();
 
         // usize::MAX is our default value we need to get rid of it from highlight vec.
-        let highlight_vec: Vec<DisplayType> = highlight_vec
+        let highlight_vec: Vec<DisplayTemp> = highlight_vec
             .iter()
             .filter_map(|&hi_oj| {
                 if hi_oj.idx != usize::MAX {
@@ -648,22 +731,24 @@ impl ValidString {
             })
             .collect();
 
-        // Override the default detected font faces.
-        let merged_faces = DisplayType::merge_font_faces(default_font_faces, font_face_vec);
+        // Fill in the default font faces.
+        let merg_fcs = DisplayTemp::default_font_faces(&def_font_map, &font_face_vec, &text);
 
         // Gen the final FontDisplayInfo objects.
-        let text_display = FontDisplayInfo::generate_list(&font_colour_vec, &merged_faces);
-        // Gen the final RectDisplayInfo objects.
+        let text_display = FontDisplayInfo::generate_list(&font_colour_vec, &merg_fcs);
+
+        // Gen the final underline RectDisplayInfo objects.
         let highlights = unsafe {
             RectDisplayInfo::gen_list(xft, dpy, fonts, &highlight_vec, &text_display, &text)
         };
-        // Gen the final RectDisplayInfo objects.
+
+        // Gen the final background RectDisplayInfo objects.
         let backgrounds = unsafe {
             RectDisplayInfo::gen_list(xft, dpy, fonts, &background_vec, &text_display, &text)
         };
 
         // Return our valid string using the objects we generated previously.
-        ValidString {
+        Input {
             text,
             text_display,
             backgrounds,
