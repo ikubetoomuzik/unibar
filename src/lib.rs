@@ -13,9 +13,15 @@ macro_rules! init {
     };
 }
 
-mod bar;
-mod config;
-mod input;
+/// Main meat of the program, where all the direct access to Xlib lives.
+pub mod bar;
 
-pub use bar::Bar;
-pub use config::Config;
+/// Parsing the config file and adjusting based on command line args provided.
+pub mod config;
+
+/// Turning basic random characters into Input struct that the Bar struct can display to the
+/// screen.
+pub mod input;
+
+/// To be used by the binary crate.
+pub use bar::{gen_config, Bar};

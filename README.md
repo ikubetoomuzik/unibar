@@ -5,15 +5,16 @@ Simple Xorg display bar written for speed and ease of use.
 ## CLI Interface
 
 ### Flags
+* **-H, --help** ---> *Display help info*
 * **-V, --version** ---> *Display version info*
-* **-h, --help** ---> *Display help info*
 
 ### Options
 * **-c, --config <CONFIG>** ---> *Specify custom config file to use.*
 * **-p, --position <POSITION>** ---> *Choose bar position, options are* __TOP__ *or* __BOTTOM__*.*
-* **-s, --size <SIZE>** ---> *Choose bar size in pixels.*
+* **-h, --height <HEIGHT>** ---> *Choose bar height in pixels.*
 * **-b, --background <DEFBACKGROUND>** ---> *Choose default bg colour in '#XXXXXX' hex format.*
-* **-u, --underline <UNDERLINE>** ---> *Choose underline highlight size in pixels.*
+* **-u, --underline <UNDERLINE>** ---> *Choose underline highlight height in pixels.*
+* **-y, --fonty <FONTY>** ---> *Choose font offset from top of bar in pixels.*
 * **-f, --fonts <FONTS>...** ---> *Comma seperated list of FcConfig font name strings. Ex. 'FontName:size=XX:antialias=true/false'.*
 * **-F, --ftcolours <FTCOLOURS>...** ---> *Comma seperated list of font colours in '#XXXXXX' hex format.*
 * **-B, --bgcolours <BGCOLOURS>...** ---> *Comma seperated list of background highlight colours in '#XXXXXX' hex format.*

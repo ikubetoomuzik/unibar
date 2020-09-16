@@ -1,0 +1,5 @@
+# Helpful Aliases
+# Created: September 15, 2020
+alias rn='default/input_script.zsh | cr -q --'
+alias kl='touch ~/.config/unibar/stop'
+

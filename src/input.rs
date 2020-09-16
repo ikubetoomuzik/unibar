@@ -71,7 +71,7 @@ pub struct ColourPalette {
     /// Colours for the background highlight.
     pub background: Vec<xft::XftColor>,
     /// Colours for the underline highlight.
-    pub highlight: Vec<xft::XftColor>,
+    pub underline: Vec<xft::XftColor>,
     /// Colours for the fonts.
     pub font: Vec<xft::XftColor>,
 }
@@ -84,7 +84,7 @@ impl ColourPalette {
     pub fn empty() -> ColourPalette {
         ColourPalette {
             background: Vec::new(),
-            highlight: Vec::new(),
+            underline: Vec::new(),
             font: Vec::new(),
         }
     }
@@ -108,7 +108,7 @@ impl ColourPalette {
             .drain(..)
             .for_each(|mut col| (xft.XftColorFree)(dpy, visual, cmap, &mut col));
         // Next the underline highlight colours.
-        self.highlight
+        self.underline
             .drain(..)
             .for_each(|mut col| (xft.XftColorFree)(dpy, visual, cmap, &mut col));
         // Finally we free our font colours.
@@ -222,7 +222,7 @@ impl DisplayTemp {
 /// Private struct to contain display info for the underline and background highlight objects.
 /// No reason to have different structs as they would just end up repeating code.
 struct RectDisplayInfo {
-    /// Index into the ColourPalette.{background or highlight} vectors of colours for this section.
+    /// Index into the ColourPalette.{background or underline} vectors of colours for this section.
     idx: usize,
     /// Pixel x-value to start.
     start: usize,
@@ -404,16 +404,16 @@ enum IndexType {
 
 #[derive(Debug)]
 /// Main struct to hold display info for text on the bar.
-/// Has references needed to display the text, backgrounds, and highlights.
+/// Has references needed to display the text, backgrounds, and underlines.
 pub struct Input {
-    /// The actual text to be drawn.
+    // The actual text to be drawn.
     text: String,
-    /// Reference for which chars to display in which font or colour.
+    // Reference for which chars to display in which font or colour.
     text_display: Vec<FontDisplayInfo>,
-    /// Reference for background highlights to draw with pixel val start and ends.
+    // Reference for background highlights to draw with pixel val start and ends.
     backgrounds: Vec<RectDisplayInfo>,
-    /// Reference for underline highlights to draw with pixel val start and ends.
-    highlights: Vec<RectDisplayInfo>,
+    // Reference for underline highlights to draw with pixel val start and ends.
+    underlines: Vec<RectDisplayInfo>,
 }
 
 impl Input {
@@ -426,7 +426,7 @@ impl Input {
             text: String::new(),
             text_display: Vec::new(),
             backgrounds: Vec::new(),
-            highlights: Vec::new(),
+            underlines: Vec::new(),
         }
     }
 
@@ -469,10 +469,10 @@ impl Input {
         });
 
         // Display the highlights next.
-        self.highlights.iter().for_each(|h| {
+        self.underlines.iter().for_each(|h| {
             (xft.XftDrawRect)(
                 draw,
-                &colours.highlight[h.idx],
+                &colours.underline[h.idx],
                 start_x + h.start as c_int,
                 (height - hlt_hgt) as c_int,
                 (h.end - h.start) as c_uint,
@@ -545,7 +545,7 @@ impl Input {
         // Result vars.
         let mut text = String::new();
         let mut background_vec: Vec<DisplayTemp> = Vec::new();
-        let mut highlight_vec: Vec<DisplayTemp> = Vec::new();
+        let mut underline_vec: Vec<DisplayTemp> = Vec::new();
         let mut font_colour_vec: Vec<DisplayTemp> = Vec::new();
         let mut font_face_vec: Vec<DisplayTemp> = Vec::new();
         let mut def_font_map: HashMap<char, usize> = HashMap::new();
@@ -553,7 +553,7 @@ impl Input {
         // Temp vars.
         let mut count: usize = 0;
         let mut bckgrnd_tmp: DisplayTemp = DisplayTemp::from(usize::MAX, 0, 0);
-        let mut highlht_tmp: DisplayTemp = DisplayTemp::from(usize::MAX, 0, 0);
+        let mut underln_tmp: DisplayTemp = DisplayTemp::from(usize::MAX, 0, 0);
         let mut fcol_tmp: DisplayTemp = DisplayTemp::from(0, 0, 0);
         let mut fface_tmp: DisplayTemp = DisplayTemp::from(usize::MAX, 0, 0);
 
@@ -570,9 +570,9 @@ impl Input {
                         }
                         // H is the marker for the underline highlight.
                         'H' => {
-                            highlht_tmp.end = count;
-                            highlight_vec.push(highlht_tmp);
-                            highlht_tmp = DisplayTemp::from(usize::MAX, count, 0);
+                            underln_tmp.end = count;
+                            underline_vec.push(underln_tmp);
+                            underln_tmp = DisplayTemp::from(usize::MAX, count, 0);
                         }
                         // F is the marker for the font colour.
                         'F' => {
@@ -613,12 +613,12 @@ impl Input {
                                 }
                             }
                             IndexType::HighlightColour => {
-                                if d > (colours.highlight.len() - 1) as c_uint {
-                                    eprintln!("Invalid highlight colour index -- TOO LARGE.");
+                                if d > (colours.underline.len() - 1) as c_uint {
+                                    eprintln!("Invalid underline colour index -- TOO LARGE.");
                                 } else {
-                                    highlht_tmp.end = count;
-                                    highlight_vec.push(highlht_tmp);
-                                    highlht_tmp = DisplayTemp::from(d as usize, count, 0);
+                                    underln_tmp.end = count;
+                                    underline_vec.push(underln_tmp);
+                                    underln_tmp = DisplayTemp::from(d as usize, count, 0);
                                 }
                             }
                             IndexType::FontColour => {
@@ -689,7 +689,7 @@ impl Input {
 
         // Set the end of the tmp var to the end count to finish off the tmp vars.
         bckgrnd_tmp.end = count;
-        highlht_tmp.end = count;
+        underln_tmp.end = count;
         fcol_tmp.end = count;
         fface_tmp.end = count;
 
@@ -697,8 +697,8 @@ impl Input {
         if bckgrnd_tmp.end != bckgrnd_tmp.start {
             background_vec.push(bckgrnd_tmp);
         }
-        if highlht_tmp.end != highlht_tmp.start {
-            highlight_vec.push(highlht_tmp);
+        if underln_tmp.end != underln_tmp.start {
+            underline_vec.push(underln_tmp);
         }
         if fcol_tmp.end != fcol_tmp.start {
             font_colour_vec.push(fcol_tmp);
@@ -720,11 +720,11 @@ impl Input {
             .collect();
 
         // usize::MAX is our default value we need to get rid of it from highlight vec.
-        let highlight_vec: Vec<DisplayTemp> = highlight_vec
+        let underline_vec: Vec<DisplayTemp> = underline_vec
             .iter()
-            .filter_map(|&hi_oj| {
-                if hi_oj.idx != usize::MAX {
-                    Some(hi_oj)
+            .filter_map(|&ul_oj| {
+                if ul_oj.idx != usize::MAX {
+                    Some(ul_oj)
                 } else {
                     None
                 }
@@ -738,8 +738,8 @@ impl Input {
         let text_display = FontDisplayInfo::generate_list(&font_colour_vec, &merg_fcs);
 
         // Gen the final underline RectDisplayInfo objects.
-        let highlights = unsafe {
-            RectDisplayInfo::gen_list(xft, dpy, fonts, &highlight_vec, &text_display, &text)
+        let underlines = unsafe {
+            RectDisplayInfo::gen_list(xft, dpy, fonts, &underline_vec, &text_display, &text)
         };
 
         // Gen the final background RectDisplayInfo objects.
@@ -752,7 +752,7 @@ impl Input {
             text,
             text_display,
             backgrounds,
-            highlights,
+            underlines,
         }
     }
 }

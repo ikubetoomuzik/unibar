@@ -1,9 +1,0 @@
-#! /bin/sh
-while [ 1 -gt 0 ]; do
-  date=$(date +%H:%M);
-  echo -n "{F0} /{/F}{F1}:{/F} 31%  {H0} 83% {/H}   {B0}{H0}{F1} $date{/F}{/H}{/B}<|>";
-  echo -n "{F0}/{/F}{F1}:{/F} 31%  {H0} 83% {/H}   {H0}{F1} $date{/F}{/H}<|>";
-  echo "{F0}    /{/F}{F1}:{/F} 31%  {H0} 83% {/H}   {H0}{F1} $date{/H}  {/F}";
-  sleep 1;
-
-done
