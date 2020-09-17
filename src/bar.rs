@@ -3,7 +3,7 @@
 // Started on August 23, 2020
 
 use super::{
-    config::{BarPos, Config},
+    config::Config,
     init,
     input::{ColourPalette, Input},
 };
@@ -44,6 +44,7 @@ pub fn gen_config() -> Config {
         (@arg CONFIG:         -c --config        +takes_value "Sets a custom config file")
         (@arg NAME:           *                  +takes_value "Sets name and is required")
         (@arg POSITION:       -p --position      +takes_value "overrides config file position option")
+        (@arg MONITOR:        -m --monitor       +takes_value "sets the monitor number to use. starts at 1")
         (@arg DEF_BACKGROUND: -b --background    +takes_value "overrides config file default background")
         (@arg HEIGHT:         -h --height        +takes_value "overrides config file bar height option")
         (@arg UNDERLINE:      -u --underline     +takes_value "overrides config file underline height option")
@@ -86,6 +87,7 @@ pub fn gen_config() -> Config {
     // Now we alter the loaded Config object with the CLI args.
     // First we check all of the options that only take one val.
     for opt in &[
+        "MONITOR",
         "POSITION",
         "DEF_BACKGROUND",
         "HEIGHT",
@@ -114,7 +116,7 @@ pub struct Bar {
     xft: xft::Xft,
     display: *mut xlib::Display,
     screen: c_int,
-    position: BarPos,
+    top: bool,
     monitor: usize,
     x: c_int,
     y: c_int,
@@ -169,7 +171,7 @@ impl Bar {
                 xft,
                 display,
                 screen,
-                position: BarPos::Top,
+                top: true,
                 monitor: 0,
                 x: 0,
                 y: 0,
@@ -197,22 +199,20 @@ impl Bar {
         // As per tradition, name first!
         self.name = conf.name;
         unsafe {
-            match conf.position {
-                BarPos::Top => {
-                    self.position = BarPos::Top;
-                    self.x = 0;
-                    self.y = 0;
-                    self.width = (self.xlib.XDisplayWidth)(self.display, self.screen);
-                    self.height = conf.height;
-                }
-                BarPos::Bottom => {
-                    self.position = BarPos::Bottom;
-                    self.x = 0;
-                    self.y = (self.xlib.XDisplayHeight)(self.display, self.screen) - conf.height;
-                    self.width = (self.xlib.XDisplayWidth)(self.display, self.screen);
-                    self.height = conf.height;
-                }
-            }
+            // We are setting x to 0 for now but we check for other monitors later.
+            self.x = 0;
+            // Bar height is configurable.
+            self.height = conf.height;
+            // Width for now is the full XDisplay width.
+            self.width = (self.xlib.XDisplayWidth)(self.display, self.screen);
+            // Duh..
+            self.top = conf.top;
+            // If its the top then 0, otherwise subtract bar height from monitor height.
+            self.y = if conf.top {
+                0
+            } else {
+                (self.xlib.XDisplayHeight)(self.display, self.screen) - conf.height
+            };
 
             // xinerama stuff
             // grab the monitor number set in the conf.
@@ -240,17 +240,19 @@ impl Bar {
                                 acc.push(*scrns.add(i));
                                 acc
                             });
-                            if self.monitor >= num_scr as usize {
-                                // If the monitor set is not available, use first screen.
-                                self.x = scrns[0].x_org as c_int;
-                                self.y = scrns[0].y_org as c_int;
-                                self.width = scrns[0].width as c_int;
+                            // If the monitor set is not available, use first screen.
+                            let scrn = if self.monitor >= num_scr as usize {
+                                scrns[0]
                             } else {
-                                // Otherwise grab the monitor from self.
-                                self.x = scrns[self.monitor].x_org as c_int;
-                                self.y = scrns[self.monitor].y_org as c_int;
-                                self.width = scrns[self.monitor].width as c_int;
-                            }
+                                scrns[self.monitor]
+                            };
+                            self.x = scrn.x_org as c_int;
+                            self.y = if self.top {
+                                scrn.y_org as c_int
+                            } else {
+                                (scrn.y_org + scrn.height) as c_int - self.height
+                            };
+                            self.width = scrn.width as c_int;
                         }
                     }
                     // Close out the temp display we opened.
@@ -424,7 +426,7 @@ impl Bar {
             self.draw,
             &self.palette,
             &self.fonts,
-            self.x,
+            0,
             self.font_y,
             self.height as c_uint,
             self.underline_height as c_uint,
@@ -437,7 +439,7 @@ impl Bar {
             self.draw,
             &self.palette,
             &self.fonts,
-            (self.x + self.width) / 2
+            self.width / 2
                 - (self.right_string.len(&self.xft, self.display, &self.fonts) as c_int / 2),
             self.font_y,
             self.height as c_uint,
@@ -451,8 +453,7 @@ impl Bar {
             self.draw,
             &self.palette,
             &self.fonts,
-            self.x + self.width
-                - self.right_string.len(&self.xft, self.display, &self.fonts) as c_int,
+            self.width - self.right_string.len(&self.xft, self.display, &self.fonts) as c_int,
             self.font_y,
             self.height as c_uint,
             self.underline_height as c_uint,
@@ -592,17 +593,14 @@ impl Bar {
         // TOP    = 2 -> height, 8 -> start x, 9 -> end x
         // BOTTOM = 3 -> height, 10 -> start x, 11 -> end x
         let mut strut: [c_long; 12] = [0; 12];
-        match self.position {
-            BarPos::Top => {
-                strut[2] = self.height as c_long;
-                strut[8] = self.x as c_long;
-                strut[9] = (self.x + self.width - 1) as c_long;
-            }
-            BarPos::Bottom => {
-                strut[3] = self.height as c_long;
-                strut[10] = self.x as c_long;
-                strut[11] = (self.x + self.width - 1) as c_long;
-            }
+        if self.top {
+            strut[2] = self.height as c_long;
+            strut[8] = self.x as c_long;
+            strut[9] = (self.x + self.width - 1) as c_long;
+        } else {
+            strut[3] = self.height as c_long;
+            strut[10] = self.x as c_long;
+            strut[11] = (self.x + self.width - 1) as c_long;
         }
         let strut_atoms = [
             self.get_atom("_NET_WM_STRUT_PARTIAL"),

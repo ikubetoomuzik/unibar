@@ -26,7 +26,7 @@ while [ 1 -gt 0 ]; do
 
   cd $DEFAULT_DIR/bspwm;
   # Get desktops
-  new_dktps=$(< "DP-5");
+  new_dktps=$(< "$1");
   if [ "$dktps" != "$new_dktps" ]; then
     # If they are different than we set the new value.
     dktps=$new_dktps;
@@ -66,7 +66,7 @@ while [ 1 -gt 0 ]; do
     unset string;
 
     # Set the left aligned section.
-    string="$dktps<|>";
+    string="{}$dktps<|>";
     # Set the center aligned section.
     string+="<|>";
     # Set the right aligned section.

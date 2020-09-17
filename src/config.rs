@@ -8,15 +8,9 @@ use std::fs::read_to_string;
 use std::os::raw::*;
 
 #[derive(Debug)]
-pub enum BarPos {
-    Top,
-    Bottom,
-}
-
-#[derive(Debug)]
 pub struct Config {
     pub name: String,         // name of the bar
-    pub position: BarPos,     // top or bottom
+    pub top: bool,            // top or bottom
     pub monitor: usize,       // xinerama montior list index for monitor
     pub height: c_int,        // width or height of bar depending on pos.
     pub ul_height: c_int,     // width or height of bar depending on pos.
@@ -32,7 +26,7 @@ impl Config {
     fn default() -> Config {
         Config {
             name: String::new(),
-            position: BarPos::Top,
+            top: true,
             monitor: 0,
             height: 32,
             ul_height: 4,
@@ -108,6 +102,7 @@ impl Config {
         // Grab the name first before we lowercase it.
         if opt == "name" {
             self.name = val.to_string();
+            return;
         }
 
         // Can't get around a big ass match statement in a situation like this.
@@ -115,16 +110,15 @@ impl Config {
         // constraints but otherwise we just push it into the Config.
         match opt {
             // skip name...
-            "name" => (),
             "position" => match val {
-                "top" => self.position = BarPos::Top,
-                "bottom" => self.position = BarPos::Bottom,
+                "top" => self.top = true,
+                "bottom" => self.top = false,
                 _ => eprintln!("Invaild position option!"),
             },
             "monitor" => {
                 if let Ok(s) = val.parse::<usize>() {
                     if s != 0 {
-                        self.monitor = s;
+                        self.monitor = s - 1;
                     } else {
                         eprintln!("Invaild size option! Needs to be a digit greater than 0.");
                     }
