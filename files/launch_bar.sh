@@ -3,6 +3,6 @@
 DEFAULT_DIR=$(dirname $(realpath $0));
 
 
-$DEFAULT_DIR/input_script.zsh "$1" | cargo run -- "$@" 
+$DEFAULT_DIR/input_$1.zsh | cargo run -q -- "$@" 
 
 

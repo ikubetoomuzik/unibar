@@ -11,6 +11,7 @@ Simple Xorg display bar written for speed and ease of use.
 ### Options
 * **-c, --config <CONFIG>** ---> *Specify custom config file to use.*
 * **-p, --position <POSITION>** ---> *Choose bar position, options are* __TOP__ *or* __BOTTOM__*.*
+* **-m, --monitor <MONITOR>** ---> *Monitor to use, the number refers to Xinerama display, index begins at the left of display and starts at 1.*
 * **-h, --height <HEIGHT>** ---> *Choose bar height in pixels.*
 * **-b, --background <DEFBACKGROUND>** ---> *Choose default bg colour in '#XXXXXX' hex format.*
 * **-u, --underline <UNDERLINE>** ---> *Choose underline highlight height in pixels.*
@@ -18,7 +19,7 @@ Simple Xorg display bar written for speed and ease of use.
 * **-f, --fonts <FONTS>...** ---> *Comma seperated list of FcConfig font name strings. Ex. 'FontName:size=XX:antialias=true/false'.*
 * **-F, --ftcolours <FTCOLOURS>...** ---> *Comma seperated list of font colours in '#XXXXXX' hex format.*
 * **-B, --bgcolours <BGCOLOURS>...** ---> *Comma seperated list of background highlight colours in '#XXXXXX' hex format.*
-* **-H, --htcolours <HTCOLOURS>...** ---> *Comma seperated list of underline highlight colours in '#XXXXXX' hex format.*
+* **-U, --ulcolours <ULCOLOURS>...** ---> *Comma seperated list of underline highlight colours in '#XXXXXX' hex format.*
 
 ## Usage
 The bar is only used to display text provided to it on *stdin*. 

@@ -175,7 +175,7 @@ impl DisplayTemp {
                 // Generating the Vec of DisplayTemp values by folding over the chars.
                 let mut res = chunk.chars().fold(Vec::new(), |mut ac, ch| {
                     // Get a copy of the default index for the char
-                    let ch_idx = def.get(&ch).unwrap().clone();
+                    let ch_idx = *def.get(&ch).unwrap();
 
                     // If the default index is different from the tmp val index then we push our
                     // tmp and start the new count.

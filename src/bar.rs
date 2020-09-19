@@ -242,6 +242,10 @@ impl Bar {
                             });
                             // If the monitor set is not available, use first screen.
                             let scrn = if self.monitor >= num_scr as usize {
+                                eprintln!(
+                                    "Monitor index: {} is too large! Using first screen.",
+                                    self.monitor + 1
+                                );
                                 scrns[0]
                             } else {
                                 scrns[self.monitor]
@@ -293,7 +297,8 @@ impl Bar {
             attributes.background_pixel = self.back_colour;
             attributes.colormap = self.cmap;
             attributes.override_redirect = xlib::False;
-            attributes.event_mask = xlib::ExposureMask | xlib::ButtonPressMask;
+            attributes.event_mask =
+                xlib::ExposureMask | xlib::ButtonPressMask | xlib::VisibilityChangeMask;
 
             // Use the attributes we created to make a window.
             self.window_id = (self.xlib.XCreateWindow)(
@@ -411,7 +416,9 @@ impl Bar {
 
             unsafe {
                 // Check events.
-                if self.poll_events() {}
+                if self.poll_events() {
+                    // println!("{:#?}", self.event);
+                }
             }
 
             thread::sleep(time::Duration::from_millis(100));
@@ -440,7 +447,7 @@ impl Bar {
             &self.palette,
             &self.fonts,
             self.width / 2
-                - (self.right_string.len(&self.xft, self.display, &self.fonts) as c_int / 2),
+                - (self.center_string.len(&self.xft, self.display, &self.fonts) as c_int / 2),
             self.font_y,
             self.height as c_uint,
             self.underline_height as c_uint,
