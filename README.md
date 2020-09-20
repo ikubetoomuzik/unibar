@@ -5,7 +5,7 @@ Simple Xorg display bar written for speed and ease of use.
 ## CLI Interface
 
 ### Required Arg
-* **<NAME>** ---> *Used to find config file, also used to create unique WMNAME.*
+* **[[NAME]]** ---> *Used to find config file, also used to create unique WMNAME.*
 
 ### Flags
 * **-H, --help** ---> *Display help info*
@@ -30,9 +30,9 @@ Simple Xorg display bar written for speed and ease of use.
 
 ## Configuration
 The bar looks for the config file at:
-  * **$XDGCONFIGDIR**/unibar/**<NAME>**.conf
+  * **$XDGCONFIGDIR**/unibar/**[[NAME]]**.conf
 **OR**
-  * **~/.config**/unibar/**<NAME>**.conf
+  * **~/.config**/unibar/**[[NAME]]**.conf
 
 ## Defaults
 Any configuration options set with command line arguements override options set in the config file.
