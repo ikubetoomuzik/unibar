@@ -2,9 +2,15 @@
 name = "unibar"
 version = "0.1.0"
 authors = ["Curtis Jones <mail@curtisjones.ca>"]
+description = "Simple minimal status bar, written with Xlib in rust."
+readme = "README.md"
+homepage = "https://github.com/ikubetoomuzik/unibar.git"
+repository = "https://github.com/ikubetoomuzik/unibar.git"
+license = "MIT"
 edition = "2018"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+exclude = [
+  "files/*",
+]
 
 [dependencies]
 x11-dl = "2.18.5"

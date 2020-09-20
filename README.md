@@ -61,6 +61,12 @@ The *splitting block* is **<|>** and seperates between the left, right, and cent
 * *1 splitting block* => the part of the string before the block will be **left-adjusted** and everything else will be **right-adjusted**.
 * *2 or more splitting blocks* => the part of the string before the first block will be **left-adjusted** the part between the first and second will be **center-adjusted** and everything between the second and third will be **right-adjusted**. Any other *splitting blocks* and their strings will be ignored.
 
+## Installation
+The project has been uploaded to crates.io and can be downloaded with:
+```sh
+cargo install unibar
+```
+
 
 
 
