@@ -11,7 +11,7 @@ use std::os::raw::*;
 pub struct Config {
     pub name: String,         // name of the bar
     pub top: bool,            // top or bottom
-    pub monitor: usize,       // xinerama montior list index for monitor
+    pub monitor: String,      // xinerama montior list index for monitor
     pub height: c_int,        // width or height of bar depending on pos.
     pub ul_height: c_int,     // width or height of bar depending on pos.
     pub fonts: Vec<String>,   // Vec of strings listing the fonts in FcLookup form.
@@ -27,7 +27,7 @@ impl Config {
         Config {
             name: String::new(),
             top: true,
-            monitor: 0,
+            monitor: String::new(),
             height: 32,
             ul_height: 4,
             fonts: vec![String::from("mono:size=12")],
@@ -115,19 +115,7 @@ impl Config {
                 "bottom" => self.top = false,
                 _ => eprintln!("Invaild position option!"),
             },
-            "monitor" => {
-                if let Ok(s) = val.parse::<usize>() {
-                    if s != 0 {
-                        self.monitor = s - 1;
-                    } else {
-                        eprintln!("Invaild size option! Needs to be a digit greater than 0.");
-                    }
-                } else {
-                    eprintln!(
-                        "Invaild size option! Needs to be a digit representable by usize integer."
-                    );
-                }
-            }
+            "monitor" => self.monitor = val.to_string(),
             "height" => {
                 if let Ok(s) = val.parse::<c_int>() {
                     self.height = s;

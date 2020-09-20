@@ -5,7 +5,7 @@ SPACING="    ";
 
 # start the bspwm watching script here.
 if ! pgrep -x bspwm_report_fo > /dev/null; then
-  $DEFAULT_DIR/bspwm/bspwm_report_format.sh &
+  $DEFAULT_DIR/bspwm_subscribe.zsh &
 fi
 
 # If the exit file already exists then clear it.

@@ -117,7 +117,7 @@ pub struct Bar {
     display: *mut xlib::Display,
     screen: c_int,
     top: bool,
-    monitor: usize,
+    monitor: String,
     x: c_int,
     y: c_int,
     width: c_int,
@@ -172,7 +172,7 @@ impl Bar {
                 display,
                 screen,
                 top: true,
-                monitor: 0,
+                monitor: String::new(),
                 x: 0,
                 y: 0,
                 width: 0,
@@ -214,58 +214,104 @@ impl Bar {
                 (self.xlib.XDisplayHeight)(self.display, self.screen) - conf.height
             };
 
-            // xinerama stuff
-            // grab the monitor number set in the conf.
             self.monitor = conf.monitor;
-            match x11_dl::xinerama::Xlib::open() {
-                Ok(xin) => {
-                    // Grab another copy of the XDisplay. Because the Xinerama methods change the pointer
-                    // and causes the close to seg fault.
-                    let dpy = (self.xlib.XOpenDisplay)(ptr::null());
-                    // Even if we have connected to the library that doesn't necessarily mean that Xinerama
-                    // is active. So we make another check here.
-                    match (xin.XineramaIsActive)(dpy) {
-                        // Old school c bool where 0 is false and anything else is true.
-                        0 => eprintln!(
-                            "Xinerama is not currently active -- using full XDisplay width."
-                        ),
-                        _ => {
-                            // Temp var because the query strings funtion needs a pointer to a c_int.
-                            let mut num_scr = 0;
-                            // Gets a dumb mutable pointer to an array of ScreenInfo objects for each screen.
-                            let scrns = (xin.XineramaQueryScreens)(dpy, &mut num_scr);
-                            // Using pointer arithmetic and the num_scr variable from the previous function we
-                            // fold the range into a Vec of ScreenInfo objects.
-                            let scrns = (0..num_scr as usize).fold(Vec::new(), |mut acc, i| {
-                                acc.push(*scrns.add(i));
-                                acc
-                            });
-                            // If the monitor set is not available, use first screen.
-                            let scrn = if self.monitor >= num_scr as usize {
-                                eprintln!(
-                                    "Monitor index: {} is too large! Using first screen.",
-                                    self.monitor + 1
-                                );
-                                scrns[0]
-                            } else {
-                                scrns[self.monitor]
-                            };
-                            self.x = scrn.x_org as c_int;
-                            self.y = if self.top {
-                                scrn.y_org as c_int
-                            } else {
-                                (scrn.y_org + scrn.height) as c_int - self.height
-                            };
-                            self.width = scrn.width as c_int;
+            if self.monitor.is_empty() {
+                eprintln!("No monitor provided, using full XDisplay!");
+            } else if let Ok(mon) = self.monitor.parse::<usize>() {
+                // If the monitor provided is a valid usize number. Then we are using Xinerama to
+                // detect monitors.
+
+                // xinerama stuff
+                // grab the monitor number set in the conf.
+                match x11_dl::xinerama::Xlib::open() {
+                    Ok(xin) => {
+                        // Grab another copy of the XDisplay. Because the Xinerama methods change the pointer
+                        // and causes the close to seg fault.
+                        let dpy = (self.xlib.XOpenDisplay)(ptr::null());
+                        // Even if we have connected to the library that doesn't necessarily mean that Xinerama
+                        // is active. So we make another check here.
+                        match (xin.XineramaIsActive)(dpy) {
+                            // Old school c bool where 0 is false and anything else is true.
+                            0 => eprintln!(
+                                "Xinerama is not currently active -- using full XDisplay width."
+                            ),
+                            _ => {
+                                // Temp var because the query strings funtion needs a pointer to a c_int.
+                                let mut num_scr = 0;
+                                // Gets a dumb mutable pointer to an array of ScreenInfo objects for each screen.
+                                let scrns = (xin.XineramaQueryScreens)(dpy, &mut num_scr);
+                                // Using pointer arithmetic and the num_scr variable from the previous function we
+                                // fold the range into a Vec of ScreenInfo objects.
+                                let scrns = (0..num_scr as usize).fold(Vec::new(), |mut acc, i| {
+                                    acc.push(*scrns.add(i));
+                                    acc
+                                });
+                                // If the monitor set is not available, use first screen.
+                                let scrn = if mon >= num_scr as usize {
+                                    eprintln!(
+                                        "Monitor index: {} is too large! Using first screen.",
+                                        mon
+                                    );
+                                    scrns[0]
+                                } else {
+                                    scrns[mon]
+                                };
+                                self.x = scrn.x_org as c_int;
+                                self.y = if self.top {
+                                    scrn.y_org as c_int
+                                } else {
+                                    (scrn.y_org + scrn.height) as c_int - self.height
+                                };
+                                self.width = scrn.width as c_int;
+                            }
                         }
+                        // Close out the temp display we opened.
+                        (self.xlib.XCloseDisplay)(dpy);
                     }
-                    // Close out the temp display we opened.
-                    (self.xlib.XCloseDisplay)(dpy);
+                    Err(e) => eprintln!(
+                        "Could not connect to Xinerama lib -- using full XDisplay width.\n{}",
+                        e
+                    ),
                 }
-                Err(e) => eprintln!(
-                    "Could not connect to Xinerama lib -- using full XDisplay width.\n{}",
-                    e
-                ),
+            } else if let Ok(xrr) = x11_dl::xrandr::Xrandr::open() {
+                // xrandr stuff
+                let dpy = (self.xlib.XOpenDisplay)(ptr::null());
+                let resources = (xrr.XRRGetScreenResources)(dpy, self.root);
+                let mut num_mon: c_int = 0;
+                let mons = (xrr.XRRGetMonitors)(dpy, self.root, xlib::True, &mut num_mon);
+                let mons = (0..num_mon as usize).fold(Vec::new(), |mut acc, i| {
+                    let m = *mons.add(i);
+                    let mut tmp = (0..m.noutput as usize).fold(Vec::new(), |mut ac, i| {
+                        let output = *m.outputs.add(i);
+                        let info = *(xrr.XRRGetOutputInfo)(dpy, resources, output);
+                        let crtc = *(xrr.XRRGetCrtcInfo)(dpy, resources, info.crtc);
+                        let name = (0..info.nameLen as usize).fold(Vec::new(), |mut acc, j| {
+                            acc.push(*info.name.add(j) as c_uchar);
+                            acc
+                        });
+                        ac.push((
+                            String::from_utf8(name).unwrap(),
+                            crtc.x,
+                            crtc.y,
+                            crtc.width as c_int,
+                            crtc.height as c_int,
+                        ));
+                        ac
+                    });
+                    acc.append(&mut tmp);
+                    acc
+                });
+                match mons.iter().find(|m| m.0 == self.monitor) {
+                    Some(m) => {
+                        self.x = m.1;
+                        self.y = if self.top { m.2 } else { m.4 - self.height };
+                        self.width = m.3;
+                    }
+                    None => eprintln!("Xrandr monitor not found, using full XDisplay!"),
+                }
+                (self.xlib.XCloseDisplay)(dpy);
+            } else {
+                eprintln!("XRandr not available, using full XDisplay!");
             }
 
             self.underline_height = conf.ul_height;

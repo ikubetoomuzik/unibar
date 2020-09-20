@@ -4,22 +4,39 @@ Simple Xorg display bar written for speed and ease of use.
 
 ## CLI Interface
 
+### Required Arg
+* **<NAME>** ---> *Used to find config file, also used to create unique WMNAME.*
+
 ### Flags
 * **-H, --help** ---> *Display help info*
 * **-V, --version** ---> *Display version info*
 
 ### Options
 * **-c, --config <CONFIG>** ---> *Specify custom config file to use.*
+ 
 * **-p, --position <POSITION>** ---> *Choose bar position, options are* __TOP__ *or* __BOTTOM__*.*
-* **-m, --monitor <MONITOR>** ---> *Monitor to use, the number refers to Xinerama display, index begins at the left of display and starts at 1.*
+* **-m, --monitor <MONITOR>** ---> *Monitor to use: can either be the Xrandr monitor name, or a number. If value is a number it is used to index the Xinerama displays. Valid index starts at 0.*
+
 * **-h, --height <HEIGHT>** ---> *Choose bar height in pixels.*
-* **-b, --background <DEFBACKGROUND>** ---> *Choose default bg colour in '#XXXXXX' hex format.*
 * **-u, --underline <UNDERLINE>** ---> *Choose underline highlight height in pixels.*
+
+* **-b, --background <DEFBACKGROUND>** ---> *Choose default bg colour in '#XXXXXX' hex format.*
 * **-y, --fonty <FONTY>** ---> *Choose font offset from top of bar in pixels.*
-* **-f, --fonts <FONTS>...** ---> *Comma seperated list of FcConfig font name strings. Ex. 'FontName:size=XX:antialias=true/false'.*
+* **-f, --fonts <FONTS>...** ---> *Comma seperated list of FcConfig font name strings. Ex. 'FontName:size=XX:antialias=true/false'*
+ 
 * **-F, --ftcolours <FTCOLOURS>...** ---> *Comma seperated list of font colours in '#XXXXXX' hex format.*
 * **-B, --bgcolours <BGCOLOURS>...** ---> *Comma seperated list of background highlight colours in '#XXXXXX' hex format.*
 * **-U, --ulcolours <ULCOLOURS>...** ---> *Comma seperated list of underline highlight colours in '#XXXXXX' hex format.*
+
+## Configuration
+The bar looks for the config file at:
+  * **$XDGCONFIGDIR**/unibar/**<NAME>**.conf
+**OR**
+  * **~/.config**/unibar/**<NAME>**.conf
+
+## Defaults
+Any configuration options set with command line arguements override options set in the config file.
+The default config file provided lays out the default options for configuration and how to override them.
 
 ## Usage
 The bar is only used to display text provided to it on *stdin*. 

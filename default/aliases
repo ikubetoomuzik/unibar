@@ -1,7 +1,5 @@
 # Helpful Aliases
 # Created: September 15, 2020
-alias rn='default/input_script.zsh | cr -q --'
 alias kl='touch ~/.config/unibar/stop'
-alias vr='v src/lib.rs'
 alias lb='files/launch_bar.sh DP-5 & files/launch_bar.sh HDMI-0 &'
 

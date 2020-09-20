@@ -64,7 +64,7 @@ while [ 1 -gt 0 ]; do
 
   ##########################################################
   # Get desktops
-  new_dktps=$(< "$DEFAULT_DIR/bspwm/DP-5");
+  new_dktps=$(< "$DEFAULT_DIR/bspwm/eDP-1");
   if [ "$dktps" != "$new_dktps" ]; then
     # If they are different than we set the new value.
     dktps=$new_dktps;
@@ -153,10 +153,10 @@ while [ 1 -gt 0 ]; do
       skip=0;
     fi
     ######################################
-    new_media_percent=$(fs_storage "/media" "~/media" "$media_percent");
-    if [ "$media_percent" != "$new_media_percent" ] && ! [ -z "$new_media_percent" ]; then
+    new_home_percent=$(fs_storage "/home" "/home" "$home_percent");
+    if [ "$home_percent" != "$new_home_percent" ] && ! [ -z "$new_home_percent" ]; then
       # If it is different than we set the new value.
-      media_percent=$new_media_percent;
+      home_percent=$new_home_percent;
       # Also need to inform the later loop to reprint string.
       skip=0;
     fi
@@ -179,7 +179,7 @@ while [ 1 -gt 0 ]; do
     # Add the section seperator.
     string+="<|>"
     # Set the right aligned section.
-    string+="  $root_percent$SPACING$media_percent$SPACING$vol_display$SPACING$ip_display$SPACING$time_display";
+    string+="  $root_percent$SPACING$home_percent$SPACING$vol_display$SPACING$ip_display$SPACING$time_display";
 
     # Print the string.
     echo "$string";
