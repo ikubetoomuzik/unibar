@@ -97,20 +97,15 @@ impl Config {
         // Doing a lot of direct comparisons so we gotta trim and set the values to lowercase.
         // Also grabbing just string slices because it makes the rest of the code look pretty.
         let opt = &opt.trim().to_lowercase()[..];
-        let val = val.trim();
-
-        // Grab the name first before we lowercase it.
-        if opt == "name" {
-            self.name = val.to_string();
-            return;
-        }
+        let val = val.trim().to_string();
 
         // Can't get around a big ass match statement in a situation like this.
         // For args that take specific vals we check to see if the val given fits within the
         // constraints but otherwise we just push it into the Config.
         match opt {
             // skip name...
-            "position" => match val {
+            "name" => self.name = val,
+            "position" => match &val.to_lowercase()[..] {
                 "top" => self.top = true,
                 "bottom" => self.top = false,
                 _ => eprintln!("Invaild position option!"),
@@ -130,7 +125,7 @@ impl Config {
                     eprintln!("Invaild highlight_size option! Needs to be a digit representable by a 32-bit integer.");
                 }
             }
-            "font" => self.fonts.push(val.to_string()),
+            "font" => self.fonts.push(val),
             "font_y" => {
                 if let Ok(y) = val.parse::<c_int>() {
                     self.font_y = y;
@@ -138,10 +133,10 @@ impl Config {
                     eprintln!("Invaild font_y option! Needs to be a digit representable by a 32-bit integer.");
                 }
             }
-            "default_background" => self.back_color = val.to_string(),
-            "ft_colour" => self.ft_clrs.push(val.to_string()),
-            "background_colour" => self.bg_clrs.push(val.to_string()),
-            "highlight_colour" => self.ul_clrs.push(val.to_string()),
+            "default_background" => self.back_color = val,
+            "ft_colour" => self.ft_clrs.push(val),
+            "background_colour" => self.bg_clrs.push(val),
+            "highlight_colour" => self.ul_clrs.push(val),
             _ => eprintln!("Invalid option -> {}", opt),
         }
     }

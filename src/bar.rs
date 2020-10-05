@@ -11,7 +11,7 @@ use clap::clap_app;
 use dirs::config_dir;
 use signal_hook::iterator::Signals;
 use std::{ffi::CString, io, mem, os::raw::*, process, ptr, sync::mpsc, thread, time};
-use x11_dl::{xft, xlib};
+use x11_dl::{xft, xinerama, xlib, xrandr};
 
 /// The function we dump into a seperate thread to wait for any input.
 /// Put in a seperate funtion to make some of the methods cleaner.
@@ -38,7 +38,7 @@ pub fn gen_config() -> Config {
     // Create an App object for parsing CLI args. Thankfully the library makes the code pretty
     // readable and there is no runtime penalty.
     let matches = clap_app!(Unibar =>
-        (version: "0.1.0")
+        (version: env!("CARGO_PKG_VERSION"))
         (author: "Curtis Jones <mail@curtisjones.ca>")
         (about: "Simple Xorg display bar!")
         (@arg CONFIG:         -c --config        +takes_value "Sets a custom config file")
@@ -139,6 +139,7 @@ pub struct Bar {
 }
 
 impl Bar {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Bar {
         unsafe {
             let xlib = match xlib::Xlib::open() {
@@ -223,7 +224,7 @@ impl Bar {
 
                 // xinerama stuff
                 // grab the monitor number set in the conf.
-                match x11_dl::xinerama::Xlib::open() {
+                match xinerama::Xlib::open() {
                     Ok(xin) => {
                         // Grab another copy of the XDisplay. Because the Xinerama methods change the pointer
                         // and causes the close to seg fault.
@@ -273,7 +274,7 @@ impl Bar {
                         e
                     ),
                 }
-            } else if let Ok(xrr) = x11_dl::xrandr::Xrandr::open() {
+            } else if let Ok(xrr) = xrandr::Xrandr::open() {
                 // xrandr stuff
                 let dpy = (self.xlib.XOpenDisplay)(ptr::null());
                 let resources = (xrr.XRRGetScreenResources)(dpy, self.root);
@@ -307,7 +308,10 @@ impl Bar {
                         self.y = if self.top { m.2 } else { m.4 - self.height };
                         self.width = m.3;
                     }
-                    None => eprintln!("Xrandr monitor not found, using full XDisplay!"),
+                    None => eprintln!(
+                        "Xrandr monitor -> {} <- not found, using full XDisplay!",
+                        self.monitor
+                    ),
                 }
                 (self.xlib.XCloseDisplay)(dpy);
             } else {
