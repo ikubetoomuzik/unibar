@@ -140,6 +140,11 @@ pub struct Bar {
 
 impl Bar {
     #[allow(clippy::new_without_default)]
+    /// Basic function to generate and empty bar object. Main focus is starting the essential
+    /// library connections.
+    ///
+    /// Output:
+    /// An unitialized Bar object, still need to load a config before it is useful.
     pub fn new() -> Bar {
         unsafe {
             let xlib = match xlib::Xlib::open() {
@@ -196,18 +201,28 @@ impl Bar {
         }
     }
 
+    /// Main initial load for the program. Parsing the config object defined previously and
+    /// creating a usable bar.
+    ///
+    /// Arguments:
+    /// * Config object made using the gen_config function.
+    ///
+    /// Output:
+    /// None, method alters the bar object itself, loading real values into the placeholders
+    /// generated in Bar::new().
     pub fn load_config(&mut self, conf: Config) {
         // As per tradition, name first!
         self.name = conf.name;
+        // We are setting x to 0 for now but we check for other monitors later.
+        self.x = 0;
+        // Bar height is configurable.
+        self.height = conf.height;
+        // Duh..
+        self.top = conf.top;
+        // Now we do all the yucky C library stuff in a big unsafe block.
         unsafe {
-            // We are setting x to 0 for now but we check for other monitors later.
-            self.x = 0;
-            // Bar height is configurable.
-            self.height = conf.height;
             // Width for now is the full XDisplay width.
             self.width = (self.xlib.XDisplayWidth)(self.display, self.screen);
-            // Duh..
-            self.top = conf.top;
             // If its the top then 0, otherwise subtract bar height from monitor height.
             self.y = if conf.top {
                 0
@@ -215,6 +230,8 @@ impl Bar {
                 (self.xlib.XDisplayHeight)(self.display, self.screen) - conf.height
             };
 
+            // Setting the monitor using Xinerama or Xrandr depending on value provided.
+            // Integer means Xinerama and any non-integer will be used to lookup in Xrandr.
             self.monitor = conf.monitor;
             if self.monitor.is_empty() {
                 eprintln!("No monitor provided, using full XDisplay!");
@@ -276,20 +293,43 @@ impl Bar {
                 }
             } else if let Ok(xrr) = xrandr::Xrandr::open() {
                 // xrandr stuff
+                // again we load a seperate pointer to the display, because otherwise we get
+                // segfaults. those are hard enough to understand when the language intends that as
+                // an error, but rust has a real hard time explaining so we just eat this and try
+                // again.
                 let dpy = (self.xlib.XOpenDisplay)(ptr::null());
                 let resources = (xrr.XRRGetScreenResources)(dpy, self.root);
+                // doesn't matter what we set here, the GetMonitors function overrides with the
+                // real val before we read.
                 let mut num_mon: c_int = 0;
+                // Now we query the library for a list on monitors and it helpfully (kill me now)
+                // returns a pointer to the first monitor and a total count in the num_mon var.
                 let mons = (xrr.XRRGetMonitors)(dpy, self.root, xlib::True, &mut num_mon);
+                // translating between weird c structs and pretty rust ones.
+                // we create a range iterator as large as the number of monitors and use pointer
+                // arithmetic to collect those into a Rust Vec.
                 let mons = (0..num_mon as usize).fold(Vec::new(), |mut acc, i| {
                     let m = *mons.add(i);
+                    // The way xrandr organizes information probably makes sense if you wrote the
+                    // library. or maybe if you can find docs because they either dont exist or
+                    // suck. Basically every Xrandr Monitor has outputs. Unless you have multiple cords
+                    // from pc to monitor you only have one output.
                     let mut tmp = (0..m.noutput as usize).fold(Vec::new(), |mut ac, i| {
                         let output = *m.outputs.add(i);
                         let info = *(xrr.XRRGetOutputInfo)(dpy, resources, output);
+                        // Inside the output object we have another object called CRTC.
                         let crtc = *(xrr.XRRGetCrtcInfo)(dpy, resources, info.crtc);
+                        // This library returns strings just like arrays, you get a pointer to the
+                        // first char and a count. So we do the same iteration trick to collect
+                        // into a string.
                         let name = (0..info.nameLen as usize).fold(Vec::new(), |mut acc, j| {
                             acc.push(*info.name.add(j) as c_uchar);
                             acc
                         });
+                        // Inside the CRTC is information that an actual human or basic ass application
+                        // like this may need. So we grab what we need there and push a tuple
+                        // containing the info into the vec, instead of the full monitor object, to
+                        // avoid all this abstraction craziness later.
                         ac.push((
                             String::from_utf8(name).unwrap(),
                             crtc.x,
@@ -299,6 +339,8 @@ impl Bar {
                         ));
                         ac
                     });
+                    // Append the tmp vec of usable monitor info to the result and finally move
+                    // onto the next Monitor.
                     acc.append(&mut tmp);
                     acc
                 });
@@ -393,6 +435,8 @@ impl Bar {
 
         loop {
             // Check signals.
+            // All of the signals basically tell the program to shutdown, so we just get ahead and
+            // make sure that we clean up properly.
             if signals.pending().count() > 0 {
                 self.close(1);
             }
@@ -405,6 +449,8 @@ impl Bar {
                 }
                 unsafe {
                     match s.matches("<|>").count() {
+                        // If there are no seperators then we assign the whole string to the left
+                        // bar section.
                         0 => {
                             self.left_string = Input::parse_string(
                                 &self.xft,
@@ -416,6 +462,8 @@ impl Bar {
                             self.center_string = Input::empty();
                             self.right_string = Input::empty();
                         }
+                        // If there is only one seperator we assign the first bit to the left and
+                        // the second to the right.
                         1 => {
                             let mut s = s.split("<|>");
                             self.left_string = Input::parse_string(
@@ -434,6 +482,8 @@ impl Bar {
                                 s.next().unwrap_or(""),
                             );
                         }
+                        // If there are two or more seperators then we are only gonna use the first
+                        // three, assign the first to left, second to center, and third to right.
                         _ => {
                             let mut s = s.split("<|>");
                             self.left_string = Input::parse_string(
@@ -496,8 +546,8 @@ impl Bar {
             self.draw,
             &self.palette,
             &self.fonts,
-            self.width / 2
-                - (self.center_string.len(&self.xft, self.display, &self.fonts) as c_int / 2),
+            (self.width - self.center_string.len(&self.xft, self.display, &self.fonts) as c_int)
+                / 2,
             self.font_y,
             self.height as c_uint,
             self.underline_height as c_uint,

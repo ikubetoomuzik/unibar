@@ -110,7 +110,7 @@ impl Config {
                 "bottom" => self.top = false,
                 _ => eprintln!("Invaild position option!"),
             },
-            "monitor" => self.monitor = val.to_string(),
+            "monitor" => self.monitor = val,
             "height" => {
                 if let Ok(s) = val.parse::<c_int>() {
                     self.height = s;
