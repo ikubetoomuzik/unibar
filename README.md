@@ -10,6 +10,7 @@ Simple Xorg display bar written for speed and ease of use.
 ### Flags
 * **-H, --help** ---> *Display help info*
 * **-V, --version** ---> *Display version info*
+* **-C, --noconfig** ---> _Do not try to load a conifg file, only use cli options._
 
 ### Options
 * **-c, --config <CONFIG>** ---> *Specify custom config file to use.*
@@ -63,7 +64,6 @@ The *splitting block* is **<|>** and seperates between the left, right, and cent
 
 ## Example
 The bar running on my system by default, set up using the scripts in the files repo.
-
 
 ![Screenshot](https://github.com/ikubetoomuzik/unibar/blob/master/files/images/screenshot01.png)
 

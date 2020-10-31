@@ -41,6 +41,7 @@ pub fn gen_config() -> Config {
         (version: env!("CARGO_PKG_VERSION"))
         (author: "Curtis Jones <mail@curtisjones.ca>")
         (about: "Simple Xorg display bar!")
+        (@arg NO_CONFIG:      -C --noconfig                   "Tells Unibar to skip loading a config file.")
         (@arg CONFIG:         -c --config        +takes_value "Sets a custom config file")
         (@arg NAME:           *                  +takes_value "Sets name and is required")
         (@arg POSITION:       -p --position      +takes_value "overrides config file position option")
@@ -79,7 +80,13 @@ pub fn gen_config() -> Config {
     let conf_opt = matches.value_of("CONFIG").unwrap_or(&default_conf);
 
     // Whatever we chose in the previous step we now try to load that config file.
-    let mut tmp = Config::from_file(conf_opt);
+    // IF we are loading a config file then we use the value generated from bar name, if not we use
+    // the default Config.
+    let mut tmp = if matches.is_present("NO_CONFIG") {
+        Config::default()
+    } else {
+        Config::from_file(conf_opt)
+    };
 
     // Set the name first as we got it earlier.
     tmp.change_option("NAME", name);
@@ -509,7 +516,7 @@ impl Bar {
                             );
                         }
                     }
-                    (self.xlib.XClearWindow)(self.display, self.window_id);
+                    self.clear_display();
                     self.draw_display();
                 }
             }
@@ -517,12 +524,22 @@ impl Bar {
             unsafe {
                 // Check events.
                 if self.poll_events() {
-                    // println!("{:#?}", self.event);
+                    match self.event.type_ {
+                        xlib::Expose => {
+                            self.clear_display();
+                            self.draw_display();
+                        }
+                        _ => unimplemented!("not here yet!"),
+                    }
                 }
             }
 
             thread::sleep(time::Duration::from_millis(100));
         }
+    }
+
+    unsafe fn clear_display(&self) {
+        (self.xlib.XClearWindow)(self.display, self.window_id);
     }
 
     unsafe fn draw_display(&self) {

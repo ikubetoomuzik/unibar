@@ -23,7 +23,7 @@ pub struct Config {
 }
 
 impl Config {
-    fn default() -> Config {
+    pub fn default() -> Config {
         Config {
             name: String::new(),
             top: true,
