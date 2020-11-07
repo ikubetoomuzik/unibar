@@ -529,7 +529,7 @@ impl Bar {
                             self.clear_display();
                             self.draw_display();
                         }
-                        _ => unimplemented!("not here yet!"),
+                        _ => (),
                     }
                 }
             }
