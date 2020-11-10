@@ -3,6 +3,7 @@
 Simple Xorg display bar written for speed and ease of use.
 
 ![Crates.io](https://img.shields.io/crates/v/unibar?color=%238be9fd)
+![Crates.io](https://img.shields.io/crates/d/unibar?color=8be9fd)
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/ikubetoomuzik/unibar?color=%23ff79c6)
 
 ## CLI Interface
