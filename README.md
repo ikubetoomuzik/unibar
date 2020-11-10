@@ -2,6 +2,8 @@
 
 Simple Xorg display bar written for speed and ease of use.
 
+![Crates.io](https://crates.io/unibar)
+
 ## CLI Interface
 
 ### Required Arg
