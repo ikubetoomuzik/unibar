@@ -7,6 +7,11 @@ Simple Xorg display bar written for speed and ease of use.
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/ikubetoomuzik/unibar?color=%23ff79c6)
 ![GitHub commits since latest release (by date)](https://img.shields.io/github/commits-since/ikubetoomuzik/unibar/latest?color=ff79c6)
 
+## Currently Under Development
+* **Modules** ---> *Adding in basic support for individually updated modules on the bar.*
+* **Loading Input** ---> *Add a config option to have unibar load the script itself as a subprocess.*
+* **Actix Actors** ---> *Reimplement the bar using Actix Actors.*
+
 ## CLI Interface
 
 ### Required Arg
