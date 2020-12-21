@@ -16,9 +16,6 @@ macro_rules! init {
 /// Main meat of the program, where all the direct access to Xlib lives.
 mod bar;
 
-/// Additional module to have a system tray display.
-mod system_tray;
-
 /// Parsing the config file and adjusting based on command line args provided.
 mod config;
 
