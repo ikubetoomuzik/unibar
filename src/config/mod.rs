@@ -115,16 +115,45 @@ impl Config {
 
     pub fn empty() -> Self {
         Self {
-            top: true,
+            top: default::top(),
             monitor: Monitor::XDisplay,
-            height: 0,
-            ul_height: 0,
-            font_y: 0,
+            height: default::height(),
+            ul_height: default::ul_height(),
+            font_y: default::font_y(),
             fonts: Vec::new(),
-            back_colour: 0,
+            back_colour: default::background_colour(),
             colours: ColourPalette::empty(),
         }
     }
 
-    pub fn update(&mut self, field: ConfigField, new_value: &str) {}
+    pub fn update(&mut self, field: ConfigField, new_value: &str) {
+        match field {
+            ConfigField::Top => match &new_value.to_lowercase()[..] {
+                "top" => self.top = true,
+                "bottom" => self.top = false,
+                _ => unreachable!(),
+            },
+            ConfigField::Monitor => match new_value.parse::<usize>() {
+                Ok(num) => todo!(), // gonna do the xinerama check here.
+                Err(_) => todo!(),  // gonna do the xrandr checks here.
+            },
+            ConfigField::Height => match new_value.parse::<c_int>() {
+                Ok(num) => self.height = num,
+                Err(_) => eprintln!("Invalid value for height arg provided."),
+            },
+            ConfigField::UlHeight => match new_value.parse::<c_int>() {
+                Ok(num) => self.ul_height = num,
+                Err(_) => eprintln!("Invalid value for underline height arg provided."),
+            },
+            ConfigField::FontY => match new_value.parse::<c_int>() {
+                Ok(num) => self.font_y = num,
+                Err(_) => eprintln!("Invalid value for font offset arg provided."),
+            },
+            ConfigField::Fonts => (),
+            ConfigField::BackgroundColor => (),
+            ConfigField::ColoursFont => (),
+            ConfigField::ColoursBackground => (),
+            ConfigField::ColoursHightlight => (),
+        }
+    }
 }

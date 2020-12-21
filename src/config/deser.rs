@@ -16,6 +16,7 @@ where
     // now we open our xlib connections.
     unsafe { Ok(get_xlib_color(&string)) }
 }
+
 // **************************************************************
 
 pub fn monitor<'de, D>(inp: D) -> Result<Monitor, D::Error>

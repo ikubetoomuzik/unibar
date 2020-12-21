@@ -83,7 +83,7 @@ pub fn gen_config() -> Config {
     // IF we are loading a config file then we use the value generated from bar name, if not we use
     // the default Config.
     let mut tmp = if matches.is_present("NO_CONFIG") {
-        Config::from_file("")
+        Config::empty()
     } else {
         Config::from_file(conf_opt)
     };
