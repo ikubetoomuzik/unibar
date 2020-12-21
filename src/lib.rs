@@ -9,15 +9,12 @@
 /// It is very much not in the rust theme but that's the price you pay for using c libraries.
 macro_rules! init {
     () => {
-        mem::MaybeUninit::uninit().assume_init();
+        std::mem::MaybeUninit::uninit().assume_init();
     };
 }
 
 /// Main meat of the program, where all the direct access to Xlib lives.
 mod bar;
-
-/// Additional module to have a system tray display.
-mod system_tray;
 
 /// Parsing the config file and adjusting based on command line args provided.
 mod config;

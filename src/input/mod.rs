@@ -4,7 +4,7 @@
 //
 
 use super::init;
-use std::{collections::HashMap, mem, os::raw::*};
+use std::{collections::HashMap, os::raw::*};
 use x11_dl::{xft, xlib, xrender::XGlyphInfo};
 
 /// Utility funtion so get the index of the first font that has a glyph for the provided char.

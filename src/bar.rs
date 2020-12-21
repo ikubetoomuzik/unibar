@@ -10,7 +10,7 @@ use super::{
 use clap::clap_app;
 use dirs::config_dir;
 use signal_hook::iterator::Signals;
-use std::{ffi::CString, io, mem, os::raw::*, process, ptr, sync::mpsc, thread, time};
+use std::{ffi::CString, io, os::raw::*, process, ptr, sync::mpsc, thread, time};
 use x11_dl::{xft, xinerama, xlib, xrandr};
 
 /// The function we dump into a seperate thread to wait for any input.
@@ -83,7 +83,7 @@ pub fn gen_config() -> Config {
     // IF we are loading a config file then we use the value generated from bar name, if not we use
     // the default Config.
     let mut tmp = if matches.is_present("NO_CONFIG") {
-        Config::default()
+        Config::from_file("")
     } else {
         Config::from_file(conf_opt)
     };
