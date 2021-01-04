@@ -23,6 +23,8 @@ pub unsafe fn get_xlib_color(name: &str) -> c_ulong {
     let mut temp: xlib::XColor = super::super::init!();
     (xlib.XParseColor)(display, cmap, name.as_ptr(), &mut temp);
     (xlib.XAllocColor)(display, cmap, &mut temp);
+    (xlib.XFreeColormap)(display, cmap);
+    (xlib.XCloseDisplay)(display);
     temp.pixel
 }
 

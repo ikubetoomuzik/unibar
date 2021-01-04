@@ -55,7 +55,7 @@ enum ConfigField {
     FontY,
     BackgroundColor,
     ColoursBackground,
-    ColoursHightlight,
+    ColoursHighlight,
     ColoursFont,
 }
 
@@ -126,5 +126,52 @@ impl Config {
         }
     }
 
-    pub fn update(&mut self, field: ConfigField, new_value: &str) {}
+    pub fn update(&mut self, field: ConfigField, new_value: &str) {
+        match field {
+            ConfigField::Top => match &new_value.to_lowercase()[..] {
+                "top" => self.top = true,
+                "bottom" => self.top = false,
+                _ => self.top = false,
+            },
+            ConfigField::Monitor => (),
+            ConfigField::Height => {
+                if let Ok(ht) = new_value.parse::<c_int>() {
+                    self.height = ht;
+                }
+            }
+            ConfigField::UlHeight => {
+                if let Ok(ht) = new_value.parse::<c_int>() {
+                    self.ul_height = ht;
+                }
+            }
+            ConfigField::FontY => {
+                if let Ok(ft) = new_value.parse::<c_int>() {
+                    self.font_y = ft;
+                }
+            }
+            ConfigField::Fonts => unsafe {
+                let (xlib, xft, display, screen) = util::get_xft_pointers();
+                let new_font = util::get_font(&xft, display, screen, new_value);
+                (xlib.XCloseDisplay)(display);
+                self.fonts.push(new_font);
+            },
+            ConfigField::BackgroundColor => unsafe {
+                self.back_colour = util::get_xlib_color(new_value);
+            },
+            _ => unsafe {
+                let (xlib, xft, display, screen) = util::get_xft_pointers();
+                let visual = (xlib.XDefaultVisual)(display, screen);
+                let cmap = (xlib.XDefaultColormap)(display, screen);
+                let new_colour = util::get_xft_colour(&xft, display, visual, cmap, new_value);
+                (xlib.XFreeColormap)(display, cmap);
+                (xlib.XCloseDisplay)(display);
+                match field {
+                    ConfigField::ColoursBackground => self.colours.background.push(new_colour),
+                    ConfigField::ColoursFont => self.colours.font.push(new_colour),
+                    ConfigField::ColoursHighlight => self.colours.underline.push(new_colour),
+                    _ => unreachable!(),
+                }
+            },
+        }
+    }
 }
