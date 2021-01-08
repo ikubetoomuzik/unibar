@@ -122,13 +122,13 @@ impl Config {
 
     pub fn empty() -> Self {
         Self {
-            top: true,
+            top: default::top(),
             monitor: Monitor::default(),
-            height: 0,
-            ul_height: 0,
-            font_y: 0,
+            height: default::height(),
+            ul_height: default::ul_height(),
+            font_y: default::font_y(),
             fonts: Vec::new(),
-            back_colour: 0,
+            back_colour: default::background_colour(),
             colours: ColourPalette::empty(),
         }
     }
