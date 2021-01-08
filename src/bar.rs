@@ -6,12 +6,13 @@ use super::{
     config::Config,
     init,
     input::{ColourPalette, Input},
+    XFT, XINERAMA, XLIB, XRANDR,
 };
 use clap::clap_app;
 use dirs::config_dir;
 use signal_hook::iterator::Signals;
 use std::{ffi::CString, io, os::raw::*, process, ptr, sync::mpsc, thread, time};
-use x11_dl::{xft, xinerama, xlib, xrandr};
+use x11_dl::{xft, xlib};
 
 /// The function we dump into a seperate thread to wait for any input.
 /// Put in a seperate funtion to make some of the methods cleaner.
@@ -88,39 +89,12 @@ pub fn gen_config() -> Config {
         Config::from_file(conf_opt)
     };
 
-    // Set the name first as we got it earlier.
-    tmp.change_option("NAME", name);
-
-    // Now we alter the loaded Config object with the CLI args.
-    // First we check all of the options that only take one val.
-    for opt in &[
-        "MONITOR",
-        "POSITION",
-        "DEF_BACKGROUND",
-        "HEIGHT",
-        "UNDERLINE",
-        "FONT_Y",
-    ] {
-        if let Some(s) = matches.value_of(opt) {
-            tmp.change_option(opt, s);
-        }
-    }
-
-    // Next we check all of the options that take multiple vals.
-    for opt in &["FONTS", "FT_COLOURS", "BG_COLOURS", "UL_COLOURS"] {
-        if let Some(strs) = matches.values_of(opt) {
-            tmp.replace_opt(opt, strs.map(|s| s.to_string()).collect());
-        }
-    }
-
     // Return the final Config to be used.
     tmp
 }
 
 pub struct Bar {
     name: String,
-    xlib: xlib::Xlib,
-    xft: xft::Xft,
     display: *mut xlib::Display,
     screen: c_int,
     top: bool,
@@ -154,34 +128,18 @@ impl Bar {
     /// An unitialized Bar object, still need to load a config before it is useful.
     pub fn new() -> Bar {
         unsafe {
-            let xlib = match xlib::Xlib::open() {
-                Ok(xlib) => xlib,
-                Err(e) => {
-                    eprintln!("Could not connect to xlib library!\nError: {}", e);
-                    std::process::exit(1);
-                }
-            };
-            let xft = match xft::Xft::open() {
-                Ok(xft) => xft,
-                Err(e) => {
-                    eprintln!("Could not connect to xft library!\nError: {}", e);
-                    std::process::exit(1);
-                }
-            };
-            let display = (xlib.XOpenDisplay)(ptr::null());
+            let display = (XLIB.XOpenDisplay)(ptr::null());
             if display.is_null() {
                 eprintln!("Could not connect to display!");
                 std::process::exit(1);
             }
-            let screen = (xlib.XDefaultScreen)(display);
-            let root = (xlib.XRootWindow)(display, screen);
-            let visual = (xlib.XDefaultVisual)(display, screen);
-            let cmap = (xlib.XDefaultColormap)(display, screen);
+            let screen = (XLIB.XDefaultScreen)(display);
+            let root = (XLIB.XRootWindow)(display, screen);
+            let visual = (XLIB.XDefaultVisual)(display, screen);
+            let cmap = (XLIB.XDefaultColormap)(display, screen);
 
             Bar {
                 name: String::new(),
-                xlib,
-                xft,
                 display,
                 screen,
                 top: true,
@@ -218,8 +176,6 @@ impl Bar {
     /// None, method alters the bar object itself, loading real values into the placeholders
     /// generated in Bar::new().
     pub fn load_config(&mut self, conf: Config) {
-        // As per tradition, name first!
-        self.name = conf.name;
         // We are setting x to 0 for now but we check for other monitors later.
         self.x = 0;
         // Bar height is configurable.
@@ -229,12 +185,12 @@ impl Bar {
         // Now we do all the yucky C library stuff in a big unsafe block.
         unsafe {
             // Width for now is the full XDisplay width.
-            self.width = (self.xlib.XDisplayWidth)(self.display, self.screen);
+            self.width = (XLIB.XDisplayWidth)(self.display, self.screen);
             // If its the top then 0, otherwise subtract bar height from monitor height.
             self.y = if conf.top {
                 0
             } else {
-                (self.xlib.XDisplayHeight)(self.display, self.screen) - conf.height
+                (XLIB.XDisplayHeight)(self.display, self.screen) - conf.height
             };
 
             // Setting the monitor using Xinerama or Xrandr depending on value provided.
@@ -248,11 +204,11 @@ impl Bar {
 
                 // xinerama stuff
                 // grab the monitor number set in the conf.
-                match xinerama::Xlib::open() {
-                    Ok(xin) => {
+                match XINERAMA {
+                    Some(xin) => {
                         // Grab another copy of the XDisplay. Because the Xinerama methods change the pointer
                         // and causes the close to seg fault.
-                        let dpy = (self.xlib.XOpenDisplay)(ptr::null());
+                        let dpy = (XLIB.XOpenDisplay)(ptr::null());
                         // Even if we have connected to the library that doesn't necessarily mean that Xinerama
                         // is active. So we make another check here.
                         match (xin.XineramaIsActive)(dpy) {
@@ -291,20 +247,19 @@ impl Bar {
                             }
                         }
                         // Close out the temp display we opened.
-                        (self.xlib.XCloseDisplay)(dpy);
+                        (XLIB.XCloseDisplay)(dpy);
                     }
-                    Err(e) => eprintln!(
-                        "Could not connect to Xinerama lib -- using full XDisplay width.\n{}",
-                        e
-                    ),
+                    None => {
+                        eprintln!("Could not connect to Xinerama lib -- using full XDisplay width.",)
+                    }
                 }
-            } else if let Ok(xrr) = xrandr::Xrandr::open() {
+            } else if let Some(xrr) = XRANDR {
                 // xrandr stuff
                 // again we load a seperate pointer to the display, because otherwise we get
                 // segfaults. those are hard enough to understand when the language intends that as
                 // an error, but rust has a real hard time explaining so we just eat this and try
                 // again.
-                let dpy = (self.xlib.XOpenDisplay)(ptr::null());
+                let dpy = (XLIB.XOpenDisplay)(ptr::null());
                 let resources = (xrr.XRRGetScreenResources)(dpy, self.root);
                 // doesn't matter what we set here, the GetMonitors function overrides with the
                 // real val before we read.
@@ -362,7 +317,7 @@ impl Bar {
                         self.monitor
                     ),
                 }
-                (self.xlib.XCloseDisplay)(dpy);
+                (XLIB.XCloseDisplay)(dpy);
             } else {
                 eprintln!("XRandr not available, using full XDisplay!");
             }
@@ -400,7 +355,7 @@ impl Bar {
                 xlib::ExposureMask | xlib::ButtonPressMask | xlib::VisibilityChangeMask;
 
             // Use the attributes we created to make a window.
-            self.window_id = (self.xlib.XCreateWindow)(
+            self.window_id = (XLIB.XCreateWindow)(
                 self.display,                // Display to use.
                 self.root,                   // Parent window.
                 self.x,                      // X position (from top-left.
@@ -414,13 +369,12 @@ impl Bar {
                 xlib::CWBackPixel | xlib::CWColormap | xlib::CWOverrideRedirect | xlib::CWEventMask, // Mask for which attributes are set.
                 &mut attributes, // Pointer to the attributes to use.
             );
-            self.draw =
-                (self.xft.XftDrawCreate)(self.display, self.window_id, self.visual, self.cmap);
+            self.draw = (XFT.XftDrawCreate)(self.display, self.window_id, self.visual, self.cmap);
 
             self.set_atoms();
 
             // Map it up.
-            (self.xlib.XMapWindow)(self.display, self.window_id);
+            (XLIB.XMapWindow)(self.display, self.window_id);
         }
     }
 
@@ -459,13 +413,8 @@ impl Bar {
                         // If there are no seperators then we assign the whole string to the left
                         // bar section.
                         0 => {
-                            self.left_string = Input::parse_string(
-                                &self.xft,
-                                self.display,
-                                &self.fonts,
-                                &self.palette,
-                                &s,
-                            );
+                            self.left_string =
+                                Input::parse_string(self.display, &self.fonts, &self.palette, &s);
                             self.center_string = Input::empty();
                             self.right_string = Input::empty();
                         }
@@ -474,7 +423,6 @@ impl Bar {
                         1 => {
                             let mut s = s.split("<|>");
                             self.left_string = Input::parse_string(
-                                &self.xft,
                                 self.display,
                                 &self.fonts,
                                 &self.palette,
@@ -482,7 +430,6 @@ impl Bar {
                             );
                             self.center_string = Input::empty();
                             self.right_string = Input::parse_string(
-                                &self.xft,
                                 self.display,
                                 &self.fonts,
                                 &self.palette,
@@ -494,21 +441,18 @@ impl Bar {
                         _ => {
                             let mut s = s.split("<|>");
                             self.left_string = Input::parse_string(
-                                &self.xft,
                                 self.display,
                                 &self.fonts,
                                 &self.palette,
                                 s.next().unwrap_or(""),
                             );
                             self.center_string = Input::parse_string(
-                                &self.xft,
                                 self.display,
                                 &self.fonts,
                                 &self.palette,
                                 s.next().unwrap_or(""),
                             );
                             self.right_string = Input::parse_string(
-                                &self.xft,
                                 self.display,
                                 &self.fonts,
                                 &self.palette,
@@ -539,13 +483,12 @@ impl Bar {
     }
 
     unsafe fn clear_display(&self) {
-        (self.xlib.XClearWindow)(self.display, self.window_id);
+        (XLIB.XClearWindow)(self.display, self.window_id);
     }
 
     unsafe fn draw_display(&self) {
         // left string.
         self.left_string.draw(
-            &self.xft,
             self.display,
             self.draw,
             &self.palette,
@@ -558,13 +501,11 @@ impl Bar {
 
         // center string.
         self.center_string.draw(
-            &self.xft,
             self.display,
             self.draw,
             &self.palette,
             &self.fonts,
-            (self.width - self.center_string.len(&self.xft, self.display, &self.fonts) as c_int)
-                / 2,
+            (self.width - self.center_string.len(self.display, &self.fonts) as c_int) / 2,
             self.font_y,
             self.height as c_uint,
             self.underline_height as c_uint,
@@ -572,12 +513,11 @@ impl Bar {
 
         // right string.
         self.right_string.draw(
-            &self.xft,
             self.display,
             self.draw,
             &self.palette,
             &self.fonts,
-            self.width - self.right_string.len(&self.xft, self.display, &self.fonts) as c_int,
+            self.width - self.right_string.len(self.display, &self.fonts) as c_int,
             self.font_y,
             self.height as c_uint,
             self.underline_height as c_uint,
@@ -587,28 +527,26 @@ impl Bar {
     pub fn close(&mut self, code: i32) {
         println!("\nShutting down...");
         unsafe {
-            self.palette
-                .destroy(&self.xft, self.display, self.cmap, self.visual);
-            (self.xft.XftDrawDestroy)(self.draw);
+            self.palette.destroy(self.display, self.cmap, self.visual);
+            (XFT.XftDrawDestroy)(self.draw);
             self.fonts
                 .iter()
-                .for_each(|&f| (self.xft.XftFontClose)(self.display, f));
-            (self.xlib.XFreeColormap)(self.display, self.cmap);
-            (self.xlib.XDestroyWindow)(self.display, self.window_id);
-            (self.xlib.XCloseDisplay)(self.display);
+                .for_each(|&f| (XFT.XftFontClose)(self.display, f));
+            (XLIB.XFreeColormap)(self.display, self.cmap);
+            (XLIB.XDestroyWindow)(self.display, self.window_id);
+            (XLIB.XCloseDisplay)(self.display);
         }
         process::exit(code);
     }
 
     unsafe fn get_atom(&self, name: &str) -> xlib::Atom {
         let name = CString::new(name).unwrap();
-        (self.xlib.XInternAtom)(self.display, name.as_ptr() as *const c_char, xlib::False)
+        (XLIB.XInternAtom)(self.display, name.as_ptr() as *const c_char, xlib::False)
     }
 
     unsafe fn get_font(&self, name: &str) -> *mut xft::XftFont {
         let name = CString::new(name).unwrap();
-        let tmp =
-            (self.xft.XftFontOpenName)(self.display, self.screen, name.as_ptr() as *const c_char);
+        let tmp = (XFT.XftFontOpenName)(self.display, self.screen, name.as_ptr() as *const c_char);
         if tmp.is_null() {
             panic!("Font {} not found!!", name.to_str().unwrap())
         } else {
@@ -619,7 +557,7 @@ impl Bar {
     unsafe fn get_xft_colour(&self, name: &str) -> xft::XftColor {
         let name = CString::new(name).unwrap();
         let mut tmp: xft::XftColor = init!();
-        (self.xft.XftColorAllocName)(
+        (XFT.XftColorAllocName)(
             self.display,
             self.visual,
             self.cmap,
@@ -632,13 +570,13 @@ impl Bar {
     unsafe fn get_xlib_color(&self, name: &str) -> c_ulong {
         let name = CString::new(name).unwrap();
         let mut temp: xlib::XColor = init!();
-        (self.xlib.XParseColor)(self.display, self.cmap, name.as_ptr(), &mut temp);
-        (self.xlib.XAllocColor)(self.display, self.cmap, &mut temp);
+        (XLIB.XParseColor)(self.display, self.cmap, name.as_ptr(), &mut temp);
+        (XLIB.XAllocColor)(self.display, self.cmap, &mut temp);
         temp.pixel
     }
 
     unsafe fn poll_events(&mut self) -> bool {
-        (self.xlib.XCheckWindowEvent)(
+        (XLIB.XCheckWindowEvent)(
             self.display,
             self.window_id,
             xlib::ButtonPressMask | xlib::ExposureMask,
@@ -650,28 +588,28 @@ impl Bar {
         // Set the WM_NAME.
         let name = format!("Unibar_{}", self.name);
         let title = CString::new(name).unwrap();
-        (self.xlib.XStoreName)(self.display, self.window_id, title.as_ptr() as *mut c_char);
+        (XLIB.XStoreName)(self.display, self.window_id, title.as_ptr() as *mut c_char);
         // Set WM_CLASS
-        let class: *mut xlib::XClassHint = (self.xlib.XAllocClassHint)();
+        let class: *mut xlib::XClassHint = (XLIB.XAllocClassHint)();
         let cl_names = [
             CString::new("unibar").unwrap(),
             CString::new("Unibar").unwrap(),
         ];
         (*class).res_name = cl_names[0].as_ptr() as *mut c_char;
         (*class).res_class = cl_names[1].as_ptr() as *mut c_char;
-        (self.xlib.XSetClassHint)(self.display, self.window_id, class);
+        (XLIB.XSetClassHint)(self.display, self.window_id, class);
         // Set WM_CLIENT_MACHINE
         let hn_size = libc::sysconf(libc::_SC_HOST_NAME_MAX) as libc::size_t;
         let hn_buffer: *mut c_char = vec![0 as c_char; hn_size].as_mut_ptr();
         libc::gethostname(hn_buffer, hn_size);
         let mut hn_list = [hn_buffer];
         let mut hn_text_prop: xlib::XTextProperty = init!();
-        (self.xlib.XStringListToTextProperty)(hn_list.as_mut_ptr(), 1, &mut hn_text_prop);
-        (self.xlib.XSetWMClientMachine)(self.display, self.window_id, &mut hn_text_prop);
+        (XLIB.XStringListToTextProperty)(hn_list.as_mut_ptr(), 1, &mut hn_text_prop);
+        (XLIB.XSetWMClientMachine)(self.display, self.window_id, &mut hn_text_prop);
         // Set _NET_WM_PID
         let pid = [process::id()].as_ptr();
         let wm_pid_atom = self.get_atom("_NET_WM_PID");
-        (self.xlib.XChangeProperty)(
+        (XLIB.XChangeProperty)(
             self.display,
             self.window_id,
             wm_pid_atom,
@@ -685,7 +623,7 @@ impl Bar {
         // Set _NET_WM_DESKTOP
         let dk_num = [0xFFFFFFFF as c_ulong].as_ptr();
         let wm_dktp_atom = self.get_atom("_NET_WM_DESKTOP");
-        (self.xlib.XChangeProperty)(
+        (XLIB.XChangeProperty)(
             self.display,
             self.window_id,
             wm_dktp_atom,
@@ -702,7 +640,7 @@ impl Bar {
             self.get_atom("_NET_WM_STATE_STICKY"),
             self.get_atom("_NET_WM_STATE_ABOVE"),
         ];
-        (self.xlib.XChangeProperty)(
+        (XLIB.XChangeProperty)(
             self.display,
             self.window_id,
             wm_state_atom,
@@ -730,7 +668,7 @@ impl Bar {
             self.get_atom("_NET_WM_STRUT_PARTIAL"),
             self.get_atom("_NET_WM_STRUT"),
         ];
-        (self.xlib.XChangeProperty)(
+        (XLIB.XChangeProperty)(
             self.display,
             self.window_id,
             strut_atoms[0],
@@ -740,7 +678,7 @@ impl Bar {
             strut.as_ptr() as *const c_uchar,
             12,
         );
-        (self.xlib.XChangeProperty)(
+        (XLIB.XChangeProperty)(
             self.display,
             self.window_id,
             strut_atoms[1],
@@ -754,7 +692,7 @@ impl Bar {
         // Set the _NET_WM_WINDOW_TYPE atom
         let win_type_atom = self.get_atom("_NET_WM_WINDOW_TYPE");
         let dock_atom = [self.get_atom("_NET_WM_WINDOW_TYPE_DOCK")];
-        (self.xlib.XChangeProperty)(
+        (XLIB.XChangeProperty)(
             self.display,
             self.window_id,
             win_type_atom,

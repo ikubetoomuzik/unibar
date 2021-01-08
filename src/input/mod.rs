@@ -3,7 +3,7 @@
 // Started on: September 07, 2020
 //
 
-use super::init;
+use super::{init, XFT};
 use std::{collections::HashMap, os::raw::*};
 use x11_dl::{xft, xlib, xrender::XGlyphInfo};
 
@@ -18,7 +18,6 @@ use x11_dl::{xft, xlib, xrender::XGlyphInfo};
 /// # Output
 /// Index of the default font in the Bar.fonts field as a usize.
 unsafe fn default_font_idx(
-    xft: &xft::Xft,
     dpy: *mut xlib::Display,
     fonts: &[*mut xft::XftFont],
     chr: char,
@@ -26,7 +25,7 @@ unsafe fn default_font_idx(
     fonts
         .iter()
         // Get the position of the first font with a glyph for chr.
-        .position(|&f| (xft.XftCharExists)(dpy, f, chr as c_uint) > 0)
+        .position(|&f| (XFT.XftCharExists)(dpy, f, chr as c_uint) > 0)
         // If none are found then we default to 0.
         .unwrap_or(0)
 }
@@ -42,7 +41,6 @@ unsafe fn default_font_idx(
 /// # Output
 /// Returns a c_uint representing the pixel with of the <string> arg.
 unsafe fn string_pixel_width(
-    xft: &xft::Xft,
     dpy: *mut xlib::Display,
     font: *mut xft::XftFont,
     string: &str,
@@ -53,7 +51,7 @@ unsafe fn string_pixel_width(
 
     // Getting just so much info about the glyphs to be printed for the string arg when using the
     // font provided.
-    (xft.XftTextExtentsUtf8)(
+    (XFT.XftTextExtentsUtf8)(
         dpy,
         font,
         string.as_bytes().as_ptr() as *mut c_uchar,
@@ -98,7 +96,6 @@ impl ColourPalette {
     /// * visual: -> Pointer to the Visual for the active Display.
     pub unsafe fn destroy(
         &mut self,
-        xft: &xft::Xft,
         dpy: *mut xlib::Display,
         cmap: xlib::Colormap,
         visual: *mut xlib::Visual,
@@ -106,15 +103,15 @@ impl ColourPalette {
         // Do the background colours first.
         self.background
             .drain(..)
-            .for_each(|mut col| (xft.XftColorFree)(dpy, visual, cmap, &mut col));
+            .for_each(|mut col| (XFT.XftColorFree)(dpy, visual, cmap, &mut col));
         // Next the underline highlight colours.
         self.underline
             .drain(..)
-            .for_each(|mut col| (xft.XftColorFree)(dpy, visual, cmap, &mut col));
+            .for_each(|mut col| (XFT.XftColorFree)(dpy, visual, cmap, &mut col));
         // Finally we free our font colours.
         self.font
             .drain(..)
-            .for_each(|mut col| (xft.XftColorFree)(dpy, visual, cmap, &mut col));
+            .for_each(|mut col| (XFT.XftColorFree)(dpy, visual, cmap, &mut col));
     }
 }
 
@@ -246,7 +243,6 @@ impl RectDisplayInfo {
     /// # Output
     /// Returns the converted list of RectDisplayInfo objects for the highlights or backgrounds.
     unsafe fn gen_list(
-        xft: &xft::Xft,
         dpy: *mut xlib::Display,
         fonts: &[*mut xft::XftFont],
         rect_display_types: &[DisplayTemp],
@@ -271,7 +267,7 @@ impl RectDisplayInfo {
                             .skip(font_display.start)
                             .take(rect_oj.start - font_display.start)
                             .collect();
-                        start += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
+                        start += string_pixel_width(dpy, fonts[font_display.face_idx], &chunk);
                         break;
                     } else {
                         // Other wise just add in the pixel withd of the whole font display.
@@ -280,7 +276,7 @@ impl RectDisplayInfo {
                             .take(font_display.end)
                             .skip(font_display.start)
                             .collect();
-                        start += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
+                        start += string_pixel_width(dpy, fonts[font_display.face_idx], &chunk);
                     }
                 }
                 // Generate the end pixel val.
@@ -289,7 +285,7 @@ impl RectDisplayInfo {
                     if font_display.start == rect_oj.end {
                         // If the start matches our end we grab one char width and we are done.
                         let chunk: String = text.chars().skip(font_display.start).take(1).collect();
-                        end += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
+                        end += string_pixel_width(dpy, fonts[font_display.face_idx], &chunk);
                         break;
                     } else if font_display.end <= rect_oj.end {
                         // If the ends match or the objects is less than ours we get the width of
@@ -299,7 +295,7 @@ impl RectDisplayInfo {
                             .take(font_display.end)
                             .skip(font_display.start)
                             .collect();
-                        end += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
+                        end += string_pixel_width(dpy, fonts[font_display.face_idx], &chunk);
                     } else {
                         // Otherwise we just get the width up to the end value our our object and
                         // convert it to pixels and finish up.
@@ -308,7 +304,7 @@ impl RectDisplayInfo {
                             .skip(font_display.start)
                             .take(rect_oj.end - font_display.start)
                             .collect();
-                        end += string_pixel_width(xft, dpy, fonts[font_display.face_idx], &chunk);
+                        end += string_pixel_width(dpy, fonts[font_display.face_idx], &chunk);
                         break;
                     }
                 }
@@ -446,7 +442,6 @@ impl Input {
     ///
     pub unsafe fn draw(
         &self,
-        xft: &xft::Xft,
         dpy: *mut xlib::Display,
         draw: *mut xft::XftDraw,
         colours: &ColourPalette,
@@ -458,7 +453,7 @@ impl Input {
     ) {
         // Displaying the backgrounds first.
         self.backgrounds.iter().for_each(|b| {
-            (xft.XftDrawRect)(
+            (XFT.XftDrawRect)(
                 draw,
                 &colours.background[b.idx],
                 start_x + b.start as c_int,
@@ -470,7 +465,7 @@ impl Input {
 
         // Display the highlights next.
         self.underlines.iter().for_each(|h| {
-            (xft.XftDrawRect)(
+            (XFT.XftDrawRect)(
                 draw,
                 &colours.underline[h.idx],
                 start_x + h.start as c_int,
@@ -483,7 +478,7 @@ impl Input {
         // Do the font bits last.
         self.text_display.iter().fold(0, |acc, td| {
             let chunk: String = self.text.chars().take(td.end).skip(td.start).collect();
-            (xft.XftDrawStringUtf8)(
+            (XFT.XftDrawStringUtf8)(
                 draw,
                 &colours.font[td.col_idx],
                 fonts[td.face_idx],
@@ -492,7 +487,7 @@ impl Input {
                 chunk.as_bytes().as_ptr() as *const c_uchar,
                 chunk.as_bytes().len() as c_int,
             );
-            acc + string_pixel_width(xft, dpy, fonts[td.face_idx], &chunk) as c_int
+            acc + string_pixel_width(dpy, fonts[td.face_idx], &chunk) as c_int
         });
     }
 
@@ -505,15 +500,10 @@ impl Input {
     ///
     /// # Output
     /// c_uint representing the pixel length of the self Input.
-    pub unsafe fn len(
-        &self,
-        xft: &xft::Xft,
-        dpy: *mut xlib::Display,
-        fonts: &[*mut xft::XftFont],
-    ) -> c_uint {
+    pub unsafe fn len(&self, dpy: *mut xlib::Display, fonts: &[*mut xft::XftFont]) -> c_uint {
         self.text_display.iter().fold(0, |acc, fd| {
             let chunk: String = self.text.chars().take(fd.end).skip(fd.start).collect();
-            acc + string_pixel_width(xft, dpy, fonts[fd.face_idx], &chunk)
+            acc + string_pixel_width(dpy, fonts[fd.face_idx], &chunk)
         })
     }
 
@@ -530,7 +520,6 @@ impl Input {
     /// # Output
     /// Input made based on the input String object.
     pub fn parse_string(
-        xft: &xft::Xft,
         dpy: *mut xlib::Display,
         fonts: &[*mut xft::XftFont],
         colours: &ColourPalette,
@@ -679,7 +668,7 @@ impl Input {
                         text.push(ch);
                         if !def_font_map.contains_key(&ch) {
                             unsafe {
-                                def_font_map.insert(ch, default_font_idx(xft, dpy, fonts, ch));
+                                def_font_map.insert(ch, default_font_idx(dpy, fonts, ch));
                             }
                         }
                     }
@@ -738,14 +727,12 @@ impl Input {
         let text_display = FontDisplayInfo::generate_list(&font_colour_vec, &merg_fcs);
 
         // Gen the final underline RectDisplayInfo objects.
-        let underlines = unsafe {
-            RectDisplayInfo::gen_list(xft, dpy, fonts, &underline_vec, &text_display, &text)
-        };
+        let underlines =
+            unsafe { RectDisplayInfo::gen_list(dpy, fonts, &underline_vec, &text_display, &text) };
 
         // Gen the final background RectDisplayInfo objects.
-        let backgrounds = unsafe {
-            RectDisplayInfo::gen_list(xft, dpy, fonts, &background_vec, &text_display, &text)
-        };
+        let backgrounds =
+            unsafe { RectDisplayInfo::gen_list(dpy, fonts, &background_vec, &text_display, &text) };
 
         // Return our valid string using the objects we generated previously.
         Input {

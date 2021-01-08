@@ -4,10 +4,14 @@
 
 // imports
 use super::{
-    util::{get_font, get_xft_pointers, get_xlib_color},
-    Monitor,
+    super::XLIB,
+    monitor::Monitor,
+    util::{get_font, get_xlib_color},
 };
-use std::os::raw::{c_int, c_ulong};
+use std::{
+    os::raw::{c_int, c_ulong},
+    ptr,
+};
 use x11_dl::xft;
 
 // export constants
@@ -24,13 +28,14 @@ pub const fn font_y() -> c_int {
     20
 }
 pub const fn monitor() -> Monitor {
-    Monitor::XDisplay
+    Monitor::default()
 }
 pub const fn fonts() -> Vec<*mut xft::XftFont> {
     unsafe {
-        let (xlib, xft, display, screen) = get_xft_pointers();
-        let res = vec![get_font(&xft, display, screen, "mono:size=12")];
-        (xlib.XCloseDisplay)(display);
+        let display = (XLIB.XOpenDisplay)(ptr::null());
+        let screen = (XLIB.XDefaultScreen)(display);
+        let res = vec![get_font(display, screen, "mono:size=12")];
+        (XLIB.XCloseDisplay)(display);
         res
     }
 }
