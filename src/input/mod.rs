@@ -3,6 +3,7 @@
 // Started on: September 07, 2020
 //
 
+use super::config::ColourPalette;
 use super::{init, XFT};
 use std::{collections::HashMap, os::raw::*};
 use x11_dl::{xft, xlib, xrender::XGlyphInfo};
@@ -61,58 +62,6 @@ unsafe fn string_pixel_width(
 
     // All that nice info and we just need the width.
     extents.width as c_uint
-}
-
-/// Private struct to contain colour information for the status bar.
-/// Simpler than storing seperate fields as individual Vecs.
-pub struct ColourPalette {
-    /// Colours for the background highlight.
-    pub background: Vec<xft::XftColor>,
-    /// Colours for the underline highlight.
-    pub underline: Vec<xft::XftColor>,
-    /// Colours for the fonts.
-    pub font: Vec<xft::XftColor>,
-}
-
-impl ColourPalette {
-    /// Simple helper function to get an empty ColourPalette object.
-    ///
-    /// # Output
-    /// ColourPalette than can be added to later.
-    pub fn empty() -> ColourPalette {
-        ColourPalette {
-            background: Vec::new(),
-            underline: Vec::new(),
-            font: Vec::new(),
-        }
-    }
-
-    /// Simple helper function to free all of the colours contained in seperate vecs.
-    ///
-    /// # Arguments
-    /// * xft:    -> Reference to the Xft library for XftColorFree.
-    /// * dpy:    -> Pointer to the Display that the bar is using.
-    /// * cmap:   -> Pointer to the Colormap for the active Display.
-    /// * visual: -> Pointer to the Visual for the active Display.
-    pub unsafe fn destroy(
-        &mut self,
-        dpy: *mut xlib::Display,
-        cmap: xlib::Colormap,
-        visual: *mut xlib::Visual,
-    ) {
-        // Do the background colours first.
-        self.background
-            .drain(..)
-            .for_each(|mut col| (XFT.XftColorFree)(dpy, visual, cmap, &mut col));
-        // Next the underline highlight colours.
-        self.underline
-            .drain(..)
-            .for_each(|mut col| (XFT.XftColorFree)(dpy, visual, cmap, &mut col));
-        // Finally we free our font colours.
-        self.font
-            .drain(..)
-            .for_each(|mut col| (XFT.XftColorFree)(dpy, visual, cmap, &mut col));
-    }
 }
 
 #[derive(Clone, Copy, Debug)]

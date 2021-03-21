@@ -6,7 +6,8 @@
 use super::{
     super::XLIB,
     monitor::Monitor,
-    util::{get_font, get_xlib_color},
+    util::{get_font, get_xft_colour, get_xlib_color},
+    ColourPalette,
 };
 use std::{
     os::raw::{c_int, c_ulong},
@@ -27,10 +28,10 @@ pub const fn ul_height() -> c_int {
 pub const fn font_y() -> c_int {
     20
 }
-pub const fn monitor() -> Monitor {
+pub fn monitor() -> Monitor {
     Monitor::default()
 }
-pub const fn fonts() -> Vec<*mut xft::XftFont> {
+pub fn fonts() -> Vec<*mut xft::XftFont> {
     unsafe {
         let display = (XLIB.XOpenDisplay)(ptr::null());
         let screen = (XLIB.XDefaultScreen)(display);
@@ -39,6 +40,25 @@ pub const fn fonts() -> Vec<*mut xft::XftFont> {
         res
     }
 }
-pub const fn background_colour() -> c_ulong {
+pub fn background_colour() -> c_ulong {
     unsafe { get_xlib_color("#000000") }
+}
+
+pub fn colours() -> ColourPalette {
+    unsafe {
+        let display = (XLIB.XOpenDisplay)(ptr::null());
+        let screen = (XLIB.XDefaultScreen)(display);
+        let cmap = (XLIB.XDefaultColormap)(display, screen);
+        let visual = (XLIB.XDefaultVisual)(display, screen);
+        let background = vec![get_xft_colour(display, visual, cmap, "#FF0000")];
+        let underline = vec![get_xft_colour(display, visual, cmap, "#00FF00")];
+        let font = vec![get_xft_colour(display, visual, cmap, "#0000FF")];
+        (XLIB.XFreeColormap)(display, cmap);
+        (XLIB.XCloseDisplay)(display);
+        ColourPalette {
+            background,
+            underline,
+            font,
+        }
+    }
 }

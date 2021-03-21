@@ -4,11 +4,12 @@
 
 // gonna start by implementing the loading from file bits.
 
-use super::XLIB;
+use super::{XFT, XLIB};
+use clap::{App, Arg};
 use serde::Deserialize;
 use serde_yaml;
 use std::{fs::read_to_string, os::raw::*, ptr};
-use x11_dl::xft;
+use x11_dl::{xft, xlib};
 
 // modules to store deserialization helpers.
 mod deser;
@@ -41,6 +42,33 @@ impl ColourPalette {
             underline: Vec::new(),
             font: Vec::new(),
         }
+    }
+
+    /// Simple helper function to free all of the colours contained in seperate vecs.
+    ///
+    /// # Arguments
+    /// * xft:    -> Reference to the Xft library for XftColorFree.
+    /// * dpy:    -> Pointer to the Display that the bar is using.
+    /// * cmap:   -> Pointer to the Colormap for the active Display.
+    /// * visual: -> Pointer to the Visual for the active Display.
+    pub unsafe fn destroy(
+        &mut self,
+        dpy: *mut xlib::Display,
+        cmap: xlib::Colormap,
+        visual: *mut xlib::Visual,
+    ) {
+        // Do the background colours first.
+        self.background
+            .drain(..)
+            .for_each(|mut col| (XFT.XftColorFree)(dpy, visual, cmap, &mut col));
+        // Next the underline highlight colours.
+        self.underline
+            .drain(..)
+            .for_each(|mut col| (XFT.XftColorFree)(dpy, visual, cmap, &mut col));
+        // Finally we free our font colours.
+        self.font
+            .drain(..)
+            .for_each(|mut col| (XFT.XftColorFree)(dpy, visual, cmap, &mut col));
     }
 }
 
@@ -90,12 +118,51 @@ pub struct Config {
     // String of the hex color.
     pub back_colour: c_ulong,
 
-    #[serde(deserialize_with = "deser::colours")]
+    #[serde(default = "default::colours", deserialize_with = "deser::colours")]
     // user colours
     pub colours: ColourPalette,
 }
 
 impl Config {
+    pub fn new() -> Self {
+        let _matches = App::new("Unibar")
+            .version(env!("CARGO_PKG_VERSION"))
+            .author("Curtis Jones <mail@curtisjones.ca>")
+            .about("Simple rust status bar.")
+            .arg(
+                Arg::with_name("NAME")
+                    .help("Sets bar name for WM_NAME and getting config file.")
+                    .takes_value(true)
+                    .required(true),
+            )
+            .arg(
+                Arg::with_name("CONFIG")
+                    .help("Define a custom config file.")
+                    .short("c")
+                    .long("config")
+                    .takes_value(true),
+            )
+            .arg(
+                Arg::with_name("NOCONFIG")
+                    .help("Tell unibar to not load a config file.")
+                    .short("C")
+                    .long("noconfig")
+                    .conflicts_with("CONFIG"),
+            )
+            .arg(
+                Arg::with_name("POSITION")
+                    .help("Top or bottom baby.")
+                    .short("p")
+                    .long("position")
+                    .takes_value(true)
+                    .possible_values(&["top", "bottom"])
+                    .case_insensitive(true),
+            )
+            .help_short("H") // We are using the lowercase h to set height.
+            .setting(clap::AppSettings::ColoredHelp) // Make it look pretty.
+            .get_matches(); // We actually only take the matches because we don't need clap for anything else.
+        todo!()
+    }
     pub fn from_file(file: &str) -> Self {
         // Read the config file to a string.
         let conf_file = match read_to_string(file) {

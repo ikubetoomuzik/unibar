@@ -2,12 +2,7 @@
 // By: Curtis Jones <git@curtisjones.ca>
 // Started on August 23, 2020
 
-use super::{
-    config::Config,
-    init,
-    input::{ColourPalette, Input},
-    XFT, XINERAMA, XLIB, XRANDR,
-};
+use super::{config::Config, init, input::Input, XFT, XLIB};
 use clap::clap_app;
 use dirs::config_dir;
 use signal_hook::iterator::Signals;
@@ -83,7 +78,7 @@ pub fn gen_config() -> Config {
     // Whatever we chose in the previous step we now try to load that config file.
     // IF we are loading a config file then we use the value generated from bar name, if not we use
     // the default Config.
-    let mut tmp = if matches.is_present("NO_CONFIG") {
+    let tmp = if matches.is_present("NO_CONFIG") {
         Config::empty()
     } else {
         Config::from_file(conf_opt)
@@ -95,25 +90,18 @@ pub fn gen_config() -> Config {
 
 pub struct Bar {
     name: String,
+    config: Config,
     display: *mut xlib::Display,
     screen: c_int,
-    top: bool,
-    monitor: String,
     x: c_int,
     y: c_int,
     width: c_int,
-    height: c_int,
-    back_colour: c_ulong,
     cmap: xlib::Colormap,
     visual: *mut xlib::Visual,
     root: c_ulong,
     window_id: c_ulong,
     event: xlib::XEvent,
     draw: *mut xft::XftDraw,
-    fonts: Vec<*mut xft::XftFont>,
-    font_y: c_int,
-    palette: ColourPalette,
-    underline_height: c_int,
     left_string: Input,
     center_string: Input,
     right_string: Input,
@@ -140,25 +128,18 @@ impl Bar {
 
             Bar {
                 name: String::new(),
+                config: Config::empty(),
                 display,
                 screen,
-                top: true,
-                monitor: String::new(),
                 x: 0,
                 y: 0,
                 width: 0,
-                height: 0,
-                back_colour: 0,
                 cmap,
                 visual,
                 root,
                 window_id: 0,
                 event: init!(),
                 draw: init!(),
-                fonts: Vec::new(),
-                font_y: 0,
-                palette: ColourPalette::empty(),
-                underline_height: 0,
                 left_string: Input::empty(),
                 center_string: Input::empty(),
                 right_string: Input::empty(),
@@ -178,10 +159,6 @@ impl Bar {
     pub fn load_config(&mut self, conf: Config) {
         // We are setting x to 0 for now but we check for other monitors later.
         self.x = 0;
-        // Bar height is configurable.
-        self.height = conf.height;
-        // Duh..
-        self.top = conf.top;
         // Now we do all the yucky C library stuff in a big unsafe block.
         unsafe {
             // Width for now is the full XDisplay width.
@@ -192,155 +169,6 @@ impl Bar {
             } else {
                 (XLIB.XDisplayHeight)(self.display, self.screen) - conf.height
             };
-
-            // Setting the monitor using Xinerama or Xrandr depending on value provided.
-            // Integer means Xinerama and any non-integer will be used to lookup in Xrandr.
-            self.monitor = conf.monitor;
-            if self.monitor.is_empty() {
-                eprintln!("No monitor provided, using full XDisplay!");
-            } else if let Ok(mon) = self.monitor.parse::<usize>() {
-                // If the monitor provided is a valid usize number. Then we are using Xinerama to
-                // detect monitors.
-
-                // xinerama stuff
-                // grab the monitor number set in the conf.
-                match XINERAMA {
-                    Some(xin) => {
-                        // Grab another copy of the XDisplay. Because the Xinerama methods change the pointer
-                        // and causes the close to seg fault.
-                        let dpy = (XLIB.XOpenDisplay)(ptr::null());
-                        // Even if we have connected to the library that doesn't necessarily mean that Xinerama
-                        // is active. So we make another check here.
-                        match (xin.XineramaIsActive)(dpy) {
-                            // Old school c bool where 0 is false and anything else is true.
-                            0 => eprintln!(
-                                "Xinerama is not currently active -- using full XDisplay width."
-                            ),
-                            _ => {
-                                // Temp var because the query strings funtion needs a pointer to a c_int.
-                                let mut num_scr = 0;
-                                // Gets a dumb mutable pointer to an array of ScreenInfo objects for each screen.
-                                let scrns = (xin.XineramaQueryScreens)(dpy, &mut num_scr);
-                                // Using pointer arithmetic and the num_scr variable from the previous function we
-                                // fold the range into a Vec of ScreenInfo objects.
-                                let scrns = (0..num_scr as usize).fold(Vec::new(), |mut acc, i| {
-                                    acc.push(*scrns.add(i));
-                                    acc
-                                });
-                                // If the monitor set is not available, use first screen.
-                                let scrn = if mon >= num_scr as usize {
-                                    eprintln!(
-                                        "Monitor index: {} is too large! Using first screen.",
-                                        mon
-                                    );
-                                    scrns[0]
-                                } else {
-                                    scrns[mon]
-                                };
-                                self.x = scrn.x_org as c_int;
-                                self.y = if self.top {
-                                    scrn.y_org as c_int
-                                } else {
-                                    (scrn.y_org + scrn.height) as c_int - self.height
-                                };
-                                self.width = scrn.width as c_int;
-                            }
-                        }
-                        // Close out the temp display we opened.
-                        (XLIB.XCloseDisplay)(dpy);
-                    }
-                    None => {
-                        eprintln!("Could not connect to Xinerama lib -- using full XDisplay width.",)
-                    }
-                }
-            } else if let Some(xrr) = XRANDR {
-                // xrandr stuff
-                // again we load a seperate pointer to the display, because otherwise we get
-                // segfaults. those are hard enough to understand when the language intends that as
-                // an error, but rust has a real hard time explaining so we just eat this and try
-                // again.
-                let dpy = (XLIB.XOpenDisplay)(ptr::null());
-                let resources = (xrr.XRRGetScreenResources)(dpy, self.root);
-                // doesn't matter what we set here, the GetMonitors function overrides with the
-                // real val before we read.
-                let mut num_mon: c_int = 0;
-                // Now we query the library for a list on monitors and it helpfully (kill me now)
-                // returns a pointer to the first monitor and a total count in the num_mon var.
-                let mons = (xrr.XRRGetMonitors)(dpy, self.root, xlib::True, &mut num_mon);
-                // translating between weird c structs and pretty rust ones.
-                // we create a range iterator as large as the number of monitors and use pointer
-                // arithmetic to collect those into a Rust Vec.
-                let mons = (0..num_mon as usize).fold(Vec::new(), |mut acc, i| {
-                    let m = *mons.add(i);
-                    // The way xrandr organizes information probably makes sense if you wrote the
-                    // library. or maybe if you can find docs because they either dont exist or
-                    // suck. Basically every Xrandr Monitor has outputs. Unless you have multiple cords
-                    // from pc to monitor you only have one output.
-                    let mut tmp = (0..m.noutput as usize).fold(Vec::new(), |mut ac, i| {
-                        let output = *m.outputs.add(i);
-                        let info = *(xrr.XRRGetOutputInfo)(dpy, resources, output);
-                        // Inside the output object we have another object called CRTC.
-                        let crtc = *(xrr.XRRGetCrtcInfo)(dpy, resources, info.crtc);
-                        // This library returns strings just like arrays, you get a pointer to the
-                        // first char and a count. So we do the same iteration trick to collect
-                        // into a string.
-                        let name = (0..info.nameLen as usize).fold(Vec::new(), |mut acc, j| {
-                            acc.push(*info.name.add(j) as c_uchar);
-                            acc
-                        });
-                        // Inside the CRTC is information that an actual human or basic ass application
-                        // like this may need. So we grab what we need there and push a tuple
-                        // containing the info into the vec, instead of the full monitor object, to
-                        // avoid all this abstraction craziness later.
-                        ac.push((
-                            String::from_utf8(name).unwrap(),
-                            crtc.x,
-                            crtc.y,
-                            crtc.width as c_int,
-                            crtc.height as c_int,
-                        ));
-                        ac
-                    });
-                    // Append the tmp vec of usable monitor info to the result and finally move
-                    // onto the next Monitor.
-                    acc.append(&mut tmp);
-                    acc
-                });
-                match mons.iter().find(|m| m.0 == self.monitor) {
-                    Some(m) => {
-                        self.x = m.1;
-                        self.y = if self.top { m.2 } else { m.4 - self.height };
-                        self.width = m.3;
-                    }
-                    None => eprintln!(
-                        "Xrandr monitor -> {} <- not found, using full XDisplay!",
-                        self.monitor
-                    ),
-                }
-                (XLIB.XCloseDisplay)(dpy);
-            } else {
-                eprintln!("XRandr not available, using full XDisplay!");
-            }
-
-            self.underline_height = conf.ul_height;
-            self.fonts = conf.fonts.iter().map(|fs| self.get_font(fs)).collect();
-            self.font_y = conf.font_y;
-            self.back_colour = self.get_xlib_color(&conf.back_color);
-            self.palette.font = conf
-                .ft_clrs
-                .iter()
-                .map(|s| self.get_xft_colour(s))
-                .collect();
-            self.palette.background = conf
-                .bg_clrs
-                .iter()
-                .map(|s| self.get_xft_colour(s))
-                .collect();
-            self.palette.underline = conf
-                .ul_clrs
-                .iter()
-                .map(|s| self.get_xft_colour(s))
-                .collect();
         }
     }
 
@@ -348,7 +176,6 @@ impl Bar {
         unsafe {
             // Manually set the attributes here so we can get more fine grain control.
             let mut attributes: xlib::XSetWindowAttributes = init!();
-            attributes.background_pixel = self.back_colour;
             attributes.colormap = self.cmap;
             attributes.override_redirect = xlib::False;
             attributes.event_mask =
@@ -356,16 +183,16 @@ impl Bar {
 
             // Use the attributes we created to make a window.
             self.window_id = (XLIB.XCreateWindow)(
-                self.display,                // Display to use.
-                self.root,                   // Parent window.
-                self.x,                      // X position (from top-left.
-                self.y,                      // Y position (from top-left.
-                self.width as c_uint,        // Length of the bar in x direction.
-                self.height as c_uint,       // Height of the bar in y direction.
-                0,                           // Border-width.
-                xlib::CopyFromParent,        // Window depth.
-                xlib::InputOutput as c_uint, // Window class.
-                self.visual,                 // Visual type to use.
+                self.display,                 // Display to use.
+                self.root,                    // Parent window.
+                self.x,                       // X position (from top-left.
+                self.y,                       // Y position (from top-left.
+                self.width as c_uint,         // Length of the bar in x direction.
+                self.config.height as c_uint, // Height of the bar in y direction.
+                0,                            // Border-width.
+                xlib::CopyFromParent,         // Window depth.
+                xlib::InputOutput as c_uint,  // Window class.
+                self.visual,                  // Visual type to use.
                 xlib::CWBackPixel | xlib::CWColormap | xlib::CWOverrideRedirect | xlib::CWEventMask, // Mask for which attributes are set.
                 &mut attributes, // Pointer to the attributes to use.
             );
@@ -413,8 +240,12 @@ impl Bar {
                         // If there are no seperators then we assign the whole string to the left
                         // bar section.
                         0 => {
-                            self.left_string =
-                                Input::parse_string(self.display, &self.fonts, &self.palette, &s);
+                            self.left_string = Input::parse_string(
+                                self.display,
+                                &self.config.fonts,
+                                &self.config.colours,
+                                &s,
+                            );
                             self.center_string = Input::empty();
                             self.right_string = Input::empty();
                         }
@@ -424,15 +255,15 @@ impl Bar {
                             let mut s = s.split("<|>");
                             self.left_string = Input::parse_string(
                                 self.display,
-                                &self.fonts,
-                                &self.palette,
+                                &self.config.fonts,
+                                &self.config.colours,
                                 s.next().unwrap_or(""),
                             );
                             self.center_string = Input::empty();
                             self.right_string = Input::parse_string(
                                 self.display,
-                                &self.fonts,
-                                &self.palette,
+                                &self.config.fonts,
+                                &self.config.colours,
                                 s.next().unwrap_or(""),
                             );
                         }
@@ -442,20 +273,20 @@ impl Bar {
                             let mut s = s.split("<|>");
                             self.left_string = Input::parse_string(
                                 self.display,
-                                &self.fonts,
-                                &self.palette,
+                                &self.config.fonts,
+                                &self.config.colours,
                                 s.next().unwrap_or(""),
                             );
                             self.center_string = Input::parse_string(
                                 self.display,
-                                &self.fonts,
-                                &self.palette,
+                                &self.config.fonts,
+                                &self.config.colours,
                                 s.next().unwrap_or(""),
                             );
                             self.right_string = Input::parse_string(
                                 self.display,
-                                &self.fonts,
-                                &self.palette,
+                                &self.config.fonts,
+                                &self.config.colours,
                                 s.next().unwrap_or(""),
                             );
                         }
@@ -491,45 +322,48 @@ impl Bar {
         self.left_string.draw(
             self.display,
             self.draw,
-            &self.palette,
-            &self.fonts,
+            &self.config.colours,
+            &self.config.fonts,
             0,
-            self.font_y,
-            self.height as c_uint,
-            self.underline_height as c_uint,
+            self.config.font_y,
+            self.config.height as c_uint,
+            self.config.ul_height as c_uint,
         );
 
         // center string.
         self.center_string.draw(
             self.display,
             self.draw,
-            &self.palette,
-            &self.fonts,
-            (self.width - self.center_string.len(self.display, &self.fonts) as c_int) / 2,
-            self.font_y,
-            self.height as c_uint,
-            self.underline_height as c_uint,
+            &self.config.colours,
+            &self.config.fonts,
+            (self.width - self.center_string.len(self.display, &self.config.fonts) as c_int) / 2,
+            self.config.font_y,
+            self.config.height as c_uint,
+            self.config.ul_height as c_uint,
         );
 
         // right string.
         self.right_string.draw(
             self.display,
             self.draw,
-            &self.palette,
-            &self.fonts,
-            self.width - self.right_string.len(self.display, &self.fonts) as c_int,
-            self.font_y,
-            self.height as c_uint,
-            self.underline_height as c_uint,
+            &self.config.colours,
+            &self.config.fonts,
+            self.width - self.right_string.len(self.display, &self.config.fonts) as c_int,
+            self.config.font_y,
+            self.config.height as c_uint,
+            self.config.ul_height as c_uint,
         );
     }
 
     pub fn close(&mut self, code: i32) {
         println!("\nShutting down...");
         unsafe {
-            self.palette.destroy(self.display, self.cmap, self.visual);
+            self.config
+                .colours
+                .destroy(self.display, self.cmap, self.visual);
             (XFT.XftDrawDestroy)(self.draw);
-            self.fonts
+            self.config
+                .fonts
                 .iter()
                 .for_each(|&f| (XFT.XftFontClose)(self.display, f));
             (XLIB.XFreeColormap)(self.display, self.cmap);
@@ -655,12 +489,12 @@ impl Bar {
         // TOP    = 2 -> height, 8 -> start x, 9 -> end x
         // BOTTOM = 3 -> height, 10 -> start x, 11 -> end x
         let mut strut: [c_long; 12] = [0; 12];
-        if self.top {
-            strut[2] = self.height as c_long;
+        if self.config.top {
+            strut[2] = self.config.height as c_long;
             strut[8] = self.x as c_long;
             strut[9] = (self.x + self.width - 1) as c_long;
         } else {
-            strut[3] = self.height as c_long;
+            strut[3] = self.config.height as c_long;
             strut[10] = self.x as c_long;
             strut[11] = (self.x + self.width - 1) as c_long;
         }
