@@ -7,10 +7,12 @@ use super::{
     init,
     input::{ColourPalette, Input},
 };
-use clap::clap_app;
-use dirs::config_dir;
+use anyhow::Result;
 use signal_hook::iterator::Signals;
-use std::{ffi::CString, io, mem, os::raw::*, process, ptr, sync::mpsc, thread, time};
+use std::{
+    collections::HashMap, ffi::CString, io, mem, os::raw::*, process, ptr, sync::mpsc, thread, time,
+};
+use thiserror::Error;
 use x11_dl::{xft, xinerama, xlib, xrandr};
 
 /// The function we dump into a seperate thread to wait for any input.
@@ -29,94 +31,13 @@ fn input_loop(stdin: io::Stdin, send: mpsc::Sender<String>) {
     }
 }
 
-/// Making a full Config by parsing the CLI arguments, parsing the config file, and mashing
-/// them together to create whatever.
-///
-/// # Output
-/// Main Config to be used for the Bar.
-pub fn gen_config() -> Config {
-    // Create an App object for parsing CLI args. Thankfully the library makes the code pretty
-    // readable and there is no runtime penalty.
-    let matches = clap_app!(Unibar =>
-        (version: env!("CARGO_PKG_VERSION"))
-        (author: "Curtis Jones <mail@curtisjones.ca>")
-        (about: "Simple Xorg display bar!")
-        (@arg NO_CONFIG:      -C --noconfig                   "Tells Unibar to skip loading a config file.")
-        (@arg CONFIG:         -c --config        +takes_value "Sets a custom config file")
-        (@arg NAME:           *                  +takes_value "Sets name and is required")
-        (@arg POSITION:       -p --position      +takes_value "overrides config file position option")
-        (@arg MONITOR:        -m --monitor       +takes_value "sets the monitor number to use. starts at 1")
-        (@arg DEF_BACKGROUND: -b --background    +takes_value "overrides config file default background")
-        (@arg HEIGHT:         -h --height        +takes_value "overrides config file bar height option")
-        (@arg UNDERLINE:      -u --underline     +takes_value "overrides config file underline height option")
-        (@arg FONT_Y:         -y --fonty         +takes_value "overrides config file font y offset option")
-        (@arg FONTS:          -f --fonts     ... +takes_value "overrides config file font options")
-        (@arg FT_COLOURS:     -F --ftcolours ... +takes_value "overrides config file font colours")
-        (@arg BG_COLOURS:     -B --bgcolours ... +takes_value "overrides config file background highlight colours")
-        (@arg UL_COLOURS:     -U --ulcolours ... +takes_value "overrides config file underline highlight colours")
-        )
-        .help_short("H") // We are using the lowercase h to set height.
-        .setting(clap::AppSettings::ColoredHelp) // Make it look pretty.
-        .get_matches(); // We actually only take the matches because we don't need clap for anything else.
-
-    // Get the name first. It's required.
-    let name = matches.value_of("NAME").unwrap();
-
-    // Decide what the default config file will be.
-    let default_conf = match config_dir() {
-        // We look in XDG_CONFIG_DIR or $HOME/.config for a unibar folder with unibar.conf
-        // avaiable.
-        Some(mut d) => {
-            let config = format!("unibar/{}.conf", name);
-            d.push(config);
-            String::from(d.to_str().unwrap())
-        }
-        // If neither of those dirs are a thing, then we just set an empty string.
-        None => String::new(),
-    };
-
-    // If a explicit config file was set in the CLI args then we use that instead of our
-    // default.
-    let conf_opt = matches.value_of("CONFIG").unwrap_or(&default_conf);
-
-    // Whatever we chose in the previous step we now try to load that config file.
-    // IF we are loading a config file then we use the value generated from bar name, if not we use
-    // the default Config.
-    let mut tmp = if matches.is_present("NO_CONFIG") {
-        Config::default()
-    } else {
-        Config::from_file(conf_opt)
-    };
-
-    // Set the name first as we got it earlier.
-    tmp.change_option("NAME", name);
-
-    // Now we alter the loaded Config object with the CLI args.
-    // First we check all of the options that only take one val.
-    for opt in &[
-        "MONITOR",
-        "POSITION",
-        "DEF_BACKGROUND",
-        "HEIGHT",
-        "UNDERLINE",
-        "FONT_Y",
-    ] {
-        if let Some(s) = matches.value_of(opt) {
-            tmp.change_option(opt, s);
-        }
-    }
-
-    // Next we check all of the options that take multiple vals.
-    for opt in &["FONTS", "FT_COLOURS", "BG_COLOURS", "UL_COLOURS"] {
-        if let Some(strs) = matches.values_of(opt) {
-            tmp.replace_opt(opt, strs.map(|s| s.to_string()).collect());
-        }
-    }
-
-    // Return the final Config to be used.
-    tmp
+#[derive(Debug, Error)]
+enum Error {
+    #[error("Failed to open a connection to the default XDisplay")]
+    DisplayOpenError,
 }
 
+/// Main struct of the whole program.
 pub struct Bar {
     name: String,
     xlib: xlib::Xlib,
@@ -136,6 +57,7 @@ pub struct Bar {
     window_id: c_ulong,
     event: xlib::XEvent,
     draw: *mut xft::XftDraw,
+    font_map: HashMap<char, usize>,
     fonts: Vec<*mut xft::XftFont>,
     font_y: c_int,
     palette: ColourPalette,
@@ -152,33 +74,21 @@ impl Bar {
     ///
     /// Output:
     /// An unitialized Bar object, still need to load a config before it is useful.
-    pub fn new() -> Bar {
+    pub fn new() -> Result<Self> {
+        // big ugly unsafe block here.
         unsafe {
-            let xlib = match xlib::Xlib::open() {
-                Ok(xlib) => xlib,
-                Err(e) => {
-                    eprintln!("Could not connect to xlib library!\nError: {}", e);
-                    std::process::exit(1);
-                }
-            };
-            let xft = match xft::Xft::open() {
-                Ok(xft) => xft,
-                Err(e) => {
-                    eprintln!("Could not connect to xft library!\nError: {}", e);
-                    std::process::exit(1);
-                }
-            };
+            let xlib = xlib::Xlib::open()?;
+            let xft = xft::Xft::open()?;
             let display = (xlib.XOpenDisplay)(ptr::null());
             if display.is_null() {
-                eprintln!("Could not connect to display!");
-                std::process::exit(1);
+                return Err(Error::DisplayOpenError.into());
             }
             let screen = (xlib.XDefaultScreen)(display);
             let root = (xlib.XRootWindow)(display, screen);
             let visual = (xlib.XDefaultVisual)(display, screen);
             let cmap = (xlib.XDefaultColormap)(display, screen);
 
-            Bar {
+            Ok(Self {
                 name: String::new(),
                 xlib,
                 xft,
@@ -197,6 +107,7 @@ impl Bar {
                 window_id: 0,
                 event: init!(),
                 draw: init!(),
+                font_map: HashMap::new(),
                 fonts: Vec::new(),
                 font_y: 0,
                 palette: ColourPalette::empty(),
@@ -204,7 +115,7 @@ impl Bar {
                 left_string: Input::empty(),
                 center_string: Input::empty(),
                 right_string: Input::empty(),
-            }
+            })
         }
     }
 
@@ -255,40 +166,39 @@ impl Bar {
                         let dpy = (self.xlib.XOpenDisplay)(ptr::null());
                         // Even if we have connected to the library that doesn't necessarily mean that Xinerama
                         // is active. So we make another check here.
-                        match (xin.XineramaIsActive)(dpy) {
-                            // Old school c bool where 0 is false and anything else is true.
-                            0 => eprintln!(
+                        // Old school c bool where 0 is false and anything else is true.
+                        if let 0 = (xin.XineramaIsActive)(dpy) {
+                            eprintln!(
                                 "Xinerama is not currently active -- using full XDisplay width."
-                            ),
-                            _ => {
-                                // Temp var because the query strings funtion needs a pointer to a c_int.
-                                let mut num_scr = 0;
-                                // Gets a dumb mutable pointer to an array of ScreenInfo objects for each screen.
-                                let scrns = (xin.XineramaQueryScreens)(dpy, &mut num_scr);
-                                // Using pointer arithmetic and the num_scr variable from the previous function we
-                                // fold the range into a Vec of ScreenInfo objects.
-                                let scrns = (0..num_scr as usize).fold(Vec::new(), |mut acc, i| {
-                                    acc.push(*scrns.add(i));
-                                    acc
-                                });
-                                // If the monitor set is not available, use first screen.
-                                let scrn = if mon >= num_scr as usize {
-                                    eprintln!(
-                                        "Monitor index: {} is too large! Using first screen.",
-                                        mon
-                                    );
-                                    scrns[0]
-                                } else {
-                                    scrns[mon]
-                                };
-                                self.x = scrn.x_org as c_int;
-                                self.y = if self.top {
-                                    scrn.y_org as c_int
-                                } else {
-                                    (scrn.y_org + scrn.height) as c_int - self.height
-                                };
-                                self.width = scrn.width as c_int;
-                            }
+                            );
+                        } else {
+                            // Temp var because the query strings funtion needs a pointer to a c_int.
+                            let mut num_scr = 0;
+                            // Gets a dumb mutable pointer to an array of ScreenInfo objects for each screen.
+                            let scrns = (xin.XineramaQueryScreens)(dpy, &mut num_scr);
+                            // Using pointer arithmetic and the num_scr variable from the previous function we
+                            // fold the range into a Vec of ScreenInfo objects.
+                            let scrns = (0..num_scr as usize).fold(Vec::new(), |mut acc, i| {
+                                acc.push(*scrns.add(i));
+                                acc
+                            });
+                            // If the monitor set is not available, use first screen.
+                            let scrn = if mon >= num_scr as usize {
+                                eprintln!(
+                                    "Monitor index: {} is too large! Using first screen.",
+                                    mon
+                                );
+                                scrns[0]
+                            } else {
+                                scrns[mon]
+                            };
+                            self.x = scrn.x_org as c_int;
+                            self.y = if self.top {
+                                scrn.y_org as c_int
+                            } else {
+                                (scrn.y_org + scrn.height) as c_int - self.height
+                            };
+                            self.width = scrn.width as c_int;
                         }
                         // Close out the temp display we opened.
                         (self.xlib.XCloseDisplay)(dpy);
@@ -454,65 +364,70 @@ impl Bar {
                 if s == "QUIT NOW" {
                     break;
                 }
+                let split: Vec<String> = s.split("<|>").map(|s| s.to_owned()).collect();
                 unsafe {
-                    match s.matches("<|>").count() {
+                    match s.len() {
                         // If there are no seperators then we assign the whole string to the left
                         // bar section.
-                        0 => {
-                            self.left_string = Input::parse_string(
+                        1 => {
+                            self.left_string.parse_string(
                                 &self.xft,
                                 self.display,
                                 &self.fonts,
+                                &mut self.font_map,
                                 &self.palette,
-                                &s,
+                                &split[0],
                             );
-                            self.center_string = Input::empty();
-                            self.right_string = Input::empty();
+                            self.center_string.clear();
+                            self.right_string.clear();
                         }
                         // If there is only one seperator we assign the first bit to the left and
                         // the second to the right.
-                        1 => {
-                            let mut s = s.split("<|>");
-                            self.left_string = Input::parse_string(
+                        2 => {
+                            self.left_string.parse_string(
                                 &self.xft,
                                 self.display,
                                 &self.fonts,
+                                &mut self.font_map,
                                 &self.palette,
-                                s.next().unwrap_or(""),
+                                &split[0],
                             );
-                            self.center_string = Input::empty();
-                            self.right_string = Input::parse_string(
+                            self.center_string.clear();
+                            self.right_string.parse_string(
                                 &self.xft,
                                 self.display,
                                 &self.fonts,
+                                &mut self.font_map,
                                 &self.palette,
-                                s.next().unwrap_or(""),
+                                &split[1],
                             );
                         }
                         // If there are two or more seperators then we are only gonna use the first
                         // three, assign the first to left, second to center, and third to right.
                         _ => {
-                            let mut s = s.split("<|>");
-                            self.left_string = Input::parse_string(
+                            self.left_string.parse_string(
                                 &self.xft,
                                 self.display,
                                 &self.fonts,
+                                &mut self.font_map,
                                 &self.palette,
-                                s.next().unwrap_or(""),
+                                &split[0],
                             );
-                            self.center_string = Input::parse_string(
+                            self.center_string.parse_string(
                                 &self.xft,
                                 self.display,
                                 &self.fonts,
+                                &mut self.font_map,
                                 &self.palette,
-                                s.next().unwrap_or(""),
+                                &split[1],
                             );
-                            self.right_string = Input::parse_string(
+                            self.right_string.parse_string(
                                 &self.xft,
                                 self.display,
                                 &self.fonts,
+                                &mut self.font_map,
                                 &self.palette,
-                                s.next().unwrap_or(""),
+                                &split[2],
                             );
                         }
                     }

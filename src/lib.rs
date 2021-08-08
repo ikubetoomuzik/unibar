@@ -17,11 +17,12 @@ macro_rules! init {
 mod bar;
 
 /// Parsing the config file and adjusting based on command line args provided.
-mod config;
+pub mod config;
 
 /// Turning basic random characters into Input struct that the Bar struct can display to the
 /// screen.
 mod input;
 
 /// To be used by the binary crate.
-pub use bar::{gen_config, Bar};
+pub use bar::Bar;
+pub use config::Config;

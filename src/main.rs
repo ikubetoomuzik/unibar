@@ -2,14 +2,15 @@
 // By: Curtis Jones
 // Started on Ausust 06, 2020
 
+use anyhow::Result;
 use unibar::*;
 
-fn main() {
+fn main() -> Result<()> {
     // Generate configuration from a file and any command line args.
-    let conf = gen_config();
+    let conf = Config::from_args()?;
 
     // Generate a new empty bar object.
-    let mut bar = Bar::new();
+    let mut bar = Bar::new()?;
 
     // Alter the bar based on the config.
     bar.load_config(conf);
@@ -25,5 +26,5 @@ fn main() {
 
     // Because we are using C libraries alot of the objects we load need to be freed manually, so
     // we do that here before exiting with the code provided as arg.
-    bar.close(0);
+    Ok(bar.close(0))
 }

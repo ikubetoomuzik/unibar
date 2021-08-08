@@ -4,7 +4,11 @@
 //
 
 use super::init;
-use std::{collections::HashMap, mem, os::raw::*};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    mem,
+    os::raw::*,
+};
 use x11_dl::{xft, xlib, xrender::XGlyphInfo};
 
 /// Utility funtion so get the index of the first font that has a glyph for the provided char.
@@ -417,6 +421,13 @@ pub struct Input {
 }
 
 impl Input {
+    /// Helper to clear
+    pub fn clear(&mut self) {
+        self.text.clear();
+        self.text_display.clear();
+        self.backgrounds.clear();
+        self.underlines.clear();
+    }
     /// Small helper function to generate an emply Input.
     ///
     /// # Output
@@ -530,12 +541,17 @@ impl Input {
     /// # Output
     /// Input made based on the input String object.
     pub fn parse_string(
+        &mut self,
         xft: &xft::Xft,
         dpy: *mut xlib::Display,
         fonts: &[*mut xft::XftFont],
+        def_font_map: &mut HashMap<char, usize>,
         colours: &ColourPalette,
         input: &str,
-    ) -> Input {
+    ) {
+        // clear self to start.
+        self.clear();
+
         // Loop vars.
         let mut in_format_block = false;
         let mut next_is_index = false;
@@ -548,7 +564,6 @@ impl Input {
         let mut underline_vec: Vec<DisplayTemp> = Vec::new();
         let mut font_colour_vec: Vec<DisplayTemp> = Vec::new();
         let mut font_face_vec: Vec<DisplayTemp> = Vec::new();
-        let mut def_font_map: HashMap<char, usize> = HashMap::new();
 
         // Temp vars.
         let mut count: usize = 0;
@@ -677,10 +692,8 @@ impl Input {
                     _ => {
                         count += 1;
                         text.push(ch);
-                        if !def_font_map.contains_key(&ch) {
-                            unsafe {
-                                def_font_map.insert(ch, default_font_idx(xft, dpy, fonts, ch));
-                            }
+                        if let Entry::Vacant(v) = def_font_map.entry(ch) {
+                            v.insert(unsafe { default_font_idx(xft, dpy, fonts, ch) });
                         }
                     }
                 }
@@ -748,11 +761,9 @@ impl Input {
         };
 
         // Return our valid string using the objects we generated previously.
-        Input {
-            text,
-            text_display,
-            backgrounds,
-            underlines,
-        }
+        self.text = text;
+        self.text_display = text_display;
+        self.underlines = underlines;
+        self.backgrounds = backgrounds;
     }
 }
