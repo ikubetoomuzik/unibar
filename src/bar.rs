@@ -68,7 +68,6 @@ pub struct Bar {
 }
 
 impl Bar {
-    #[allow(clippy::new_without_default)]
     /// Basic function to generate and empty bar object. Main focus is starting the essential
     /// library connections.
     ///
@@ -439,6 +438,7 @@ impl Bar {
             unsafe {
                 // Check events.
                 if self.poll_events() {
+                    #[allow(clippy::single_match)]
                     match self.event.type_ {
                         xlib::Expose => {
                             self.clear_display();

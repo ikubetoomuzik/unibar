@@ -3,7 +3,7 @@
 // Started on Ausust 06, 2020
 
 use anyhow::Result;
-use unibar::*;
+use unibar::{Bar, Config};
 
 fn main() -> Result<()> {
     // Generate configuration from a file and any command line args.
@@ -26,5 +26,6 @@ fn main() -> Result<()> {
 
     // Because we are using C libraries alot of the objects we load need to be freed manually, so
     // we do that here before exiting with the code provided as arg.
-    Ok(bar.close(0))
+    bar.close(0);
+    Ok(())
 }

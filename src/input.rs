@@ -455,6 +455,7 @@ impl Input {
     /// * height:  -> Height of the bar.
     /// * hlt_hgt: -> Height of the underline highlights.
     ///
+    #[allow(clippy::too_many_arguments)]
     pub unsafe fn draw(
         &self,
         xft: &xft::Xft,
@@ -745,7 +746,7 @@ impl Input {
             .collect();
 
         // Fill in the default font faces.
-        let merg_fcs = DisplayTemp::default_font_faces(&def_font_map, &font_face_vec, &text);
+        let merg_fcs = DisplayTemp::default_font_faces(def_font_map, &font_face_vec, &text);
 
         // Gen the final FontDisplayInfo objects.
         let text_display = FontDisplayInfo::generate_list(&font_colour_vec, &merg_fcs);
