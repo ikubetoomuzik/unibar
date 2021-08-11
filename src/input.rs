@@ -7,7 +7,6 @@ use super::init;
 use std::{
     collections::{hash_map::Entry, HashMap},
     mem,
-    os::raw::*,
 };
 use x11_dl::{xft, xlib, xrender::XGlyphInfo};
 
@@ -30,7 +29,7 @@ unsafe fn default_font_idx(
     fonts
         .iter()
         // Get the position of the first font with a glyph for chr.
-        .position(|&f| (xft.XftCharExists)(dpy, f, chr as c_uint) > 0)
+        .position(|&f| (xft.XftCharExists)(dpy, f, chr as u32) > 0)
         // If none are found then we default to 0.
         .unwrap_or(0)
 }
@@ -50,7 +49,7 @@ unsafe fn string_pixel_width(
     dpy: *mut xlib::Display,
     font: *mut xft::XftFont,
     string: &str,
-) -> c_uint {
+) -> u32 {
     // Rust gets mad if you don't initialize a variable before providing it as a function arg so we
     // lie to the rust compiler.
     let mut extents: XGlyphInfo = init!();
@@ -60,13 +59,13 @@ unsafe fn string_pixel_width(
     (xft.XftTextExtentsUtf8)(
         dpy,
         font,
-        string.as_bytes().as_ptr() as *mut c_uchar,
-        string.as_bytes().len() as c_int,
+        string.as_bytes().as_ptr() as *mut u8,
+        string.as_bytes().len() as i32,
         &mut extents,
     );
 
     // All that nice info and we just need the width.
-    extents.width as c_uint
+    extents.width as u32
 }
 
 /// Private struct to contain colour information for the status bar.
@@ -463,19 +462,19 @@ impl Input {
         draw: *mut xft::XftDraw,
         colours: &ColourPalette,
         fonts: &[*mut xft::XftFont],
-        start_x: c_int,
-        font_y: c_int,
-        height: c_uint,
-        hlt_hgt: c_uint,
+        start_x: i32,
+        font_y: i32,
+        height: u32,
+        hlt_hgt: u32,
     ) {
         // Displaying the backgrounds first.
         self.backgrounds.iter().for_each(|b| {
             (xft.XftDrawRect)(
                 draw,
                 &colours.background[b.idx],
-                start_x + b.start as c_int,
+                start_x + b.start as i32,
                 0,
-                (b.end - b.start) as c_uint,
+                (b.end - b.start) as u32,
                 height,
             );
         });
@@ -485,9 +484,9 @@ impl Input {
             (xft.XftDrawRect)(
                 draw,
                 &colours.underline[h.idx],
-                start_x + h.start as c_int,
-                (height - hlt_hgt) as c_int,
-                (h.end - h.start) as c_uint,
+                start_x + h.start as i32,
+                (height - hlt_hgt) as i32,
+                (h.end - h.start) as u32,
                 hlt_hgt,
             );
         });
@@ -501,10 +500,10 @@ impl Input {
                 fonts[td.face_idx],
                 start_x + acc,
                 font_y,
-                chunk.as_bytes().as_ptr() as *const c_uchar,
-                chunk.as_bytes().len() as c_int,
+                chunk.as_bytes().as_ptr() as *const u8,
+                chunk.as_bytes().len() as i32,
             );
-            acc + string_pixel_width(xft, dpy, fonts[td.face_idx], &chunk) as c_int
+            acc + string_pixel_width(xft, dpy, fonts[td.face_idx], &chunk) as i32
         });
     }
 
@@ -522,7 +521,7 @@ impl Input {
         xft: &xft::Xft,
         dpy: *mut xlib::Display,
         fonts: &[*mut xft::XftFont],
-    ) -> c_uint {
+    ) -> u32 {
         self.text_display.iter().fold(0, |acc, fd| {
             let chunk: String = self.text.chars().take(fd.end).skip(fd.start).collect();
             acc + string_pixel_width(xft, dpy, fonts[fd.face_idx], &chunk)
@@ -620,7 +619,7 @@ impl Input {
                         // start a new tmp count.
                         match index_type {
                             IndexType::BackgroundColour => {
-                                if d > (colours.background.len() - 1) as c_uint {
+                                if d > (colours.background.len() - 1) as u32 {
                                     eprintln!("Invalid background colour index -- TOO LARGE.");
                                 } else {
                                     bckgrnd_tmp.end = count;
@@ -629,7 +628,7 @@ impl Input {
                                 }
                             }
                             IndexType::HighlightColour => {
-                                if d > (colours.underline.len() - 1) as c_uint {
+                                if d > (colours.underline.len() - 1) as u32 {
                                     eprintln!("Invalid underline colour index -- TOO LARGE.");
                                 } else {
                                     underln_tmp.end = count;
@@ -638,7 +637,7 @@ impl Input {
                                 }
                             }
                             IndexType::FontColour => {
-                                if d > (colours.font.len() - 1) as c_uint {
+                                if d > (colours.font.len() - 1) as u32 {
                                     eprintln!("Invalid font colour index -- TOO LARGE.");
                                 } else {
                                     fcol_tmp.end = count;
@@ -647,7 +646,7 @@ impl Input {
                                 }
                             }
                             IndexType::FontFace => {
-                                if d > (fonts.len() - 1) as c_uint {
+                                if d > (fonts.len() - 1) as u32 {
                                     eprintln!("Invalid font face index -- TOO LARGE.");
                                 } else {
                                     fface_tmp.end = count;

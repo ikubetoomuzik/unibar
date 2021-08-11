@@ -8,7 +8,6 @@ use anyhow::Result;
 use clap::clap_app;
 use dirs::config_dir;
 use std::fs::read_to_string;
-use std::os::raw::*;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Could not generate config.")]
@@ -19,10 +18,10 @@ pub struct Config {
     pub name: String,         // name of the bar
     pub top: bool,            // top or bottom
     pub monitor: String,      // xinerama montior list index for monitor
-    pub height: c_int,        // width or height of bar depending on pos.
-    pub ul_height: c_int,     // width or height of bar depending on pos.
+    pub height: i32,          // width or height of bar depending on pos.
+    pub ul_height: i32,       // width or height of bar depending on pos.
     pub fonts: Vec<String>,   // Vec of strings listing the fonts in FcLookup form.
-    pub font_y: c_int,        // pixel offset from the top of bar to bottom font.
+    pub font_y: i32,          // pixel offset from the top of bar to bottom font.
     pub back_color: String,   // String of the hex color.
     pub ft_clrs: Vec<String>, // String of the hex color.
     pub bg_clrs: Vec<String>, // String of the hex color.
@@ -199,14 +198,14 @@ impl Config {
             },
             "monitor" => self.monitor = val,
             "height" => {
-                if let Ok(s) = val.parse::<c_int>() {
+                if let Ok(s) = val.parse::<i32>() {
                     self.height = s;
                 } else {
                     eprintln!("Invaild size option! Needs to be a digit representable by a 32-bit integer.");
                 }
             }
             "underline_height" => {
-                if let Ok(s) = val.parse::<c_int>() {
+                if let Ok(s) = val.parse::<i32>() {
                     self.ul_height = s;
                 } else {
                     eprintln!("Invaild highlight_size option! Needs to be a digit representable by a 32-bit integer.");
@@ -214,7 +213,7 @@ impl Config {
             }
             "font" => self.fonts.push(val),
             "font_y" => {
-                if let Ok(y) = val.parse::<c_int>() {
+                if let Ok(y) = val.parse::<i32>() {
                     self.font_y = y;
                 } else {
                     eprintln!("Invaild font_y option! Needs to be a digit representable by a 32-bit integer.");

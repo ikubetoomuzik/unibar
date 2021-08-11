@@ -9,9 +9,7 @@ use super::{
 };
 use anyhow::Result;
 use signal_hook::iterator::Signals;
-use std::{
-    collections::HashMap, ffi::CString, io, mem, os::raw::*, process, ptr, sync::mpsc, thread, time,
-};
+use std::{collections::HashMap, ffi::CString, io, mem, process, ptr, sync::mpsc, thread, time};
 use thiserror::Error;
 use x11_dl::{xft, xinerama, xlib, xrandr};
 
@@ -43,25 +41,25 @@ pub struct Bar {
     xlib: xlib::Xlib,
     xft: xft::Xft,
     display: *mut xlib::Display,
-    screen: c_int,
+    screen: i32,
     top: bool,
     monitor: String,
-    x: c_int,
-    y: c_int,
-    width: c_int,
-    height: c_int,
-    back_colour: c_ulong,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    back_colour: u64,
     cmap: xlib::Colormap,
     visual: *mut xlib::Visual,
-    root: c_ulong,
-    window_id: c_ulong,
+    root: u64,
+    window_id: u64,
     event: xlib::XEvent,
     draw: *mut xft::XftDraw,
     font_map: HashMap<char, usize>,
     fonts: Vec<*mut xft::XftFont>,
-    font_y: c_int,
+    font_y: i32,
     palette: ColourPalette,
-    underline_height: c_int,
+    underline_height: i32,
     left_string: Input,
     center_string: Input,
     right_string: Input,
@@ -171,7 +169,7 @@ impl Bar {
                                 "Xinerama is not currently active -- using full XDisplay width."
                             );
                         } else {
-                            // Temp var because the query strings funtion needs a pointer to a c_int.
+                            // Temp var because the query strings funtion needs a pointer to a i32.
                             let mut num_scr = 0;
                             // Gets a dumb mutable pointer to an array of ScreenInfo objects for each screen.
                             let scrns = (xin.XineramaQueryScreens)(dpy, &mut num_scr);
@@ -191,13 +189,13 @@ impl Bar {
                             } else {
                                 scrns[mon]
                             };
-                            self.x = scrn.x_org as c_int;
+                            self.x = scrn.x_org as i32;
                             self.y = if self.top {
-                                scrn.y_org as c_int
+                                scrn.y_org as i32
                             } else {
-                                (scrn.y_org + scrn.height) as c_int - self.height
+                                (scrn.y_org + scrn.height) as i32 - self.height
                             };
-                            self.width = scrn.width as c_int;
+                            self.width = scrn.width as i32;
                         }
                         // Close out the temp display we opened.
                         (self.xlib.XCloseDisplay)(dpy);
@@ -217,7 +215,7 @@ impl Bar {
                 let resources = (xrr.XRRGetScreenResources)(dpy, self.root);
                 // doesn't matter what we set here, the GetMonitors function overrides with the
                 // real val before we read.
-                let mut num_mon: c_int = 0;
+                let mut num_mon: i32 = 0;
                 // Now we query the library for a list on monitors and it helpfully (kill me now)
                 // returns a pointer to the first monitor and a total count in the num_mon var.
                 let mons = (xrr.XRRGetMonitors)(dpy, self.root, xlib::True, &mut num_mon);
@@ -239,7 +237,7 @@ impl Bar {
                         // first char and a count. So we do the same iteration trick to collect
                         // into a string.
                         let name = (0..info.nameLen as usize).fold(Vec::new(), |mut acc, j| {
-                            acc.push(*info.name.add(j) as c_uchar);
+                            acc.push(*info.name.add(j) as u8);
                             acc
                         });
                         // Inside the CRTC is information that an actual human or basic ass application
@@ -250,8 +248,8 @@ impl Bar {
                             String::from_utf8(name).unwrap(),
                             crtc.x,
                             crtc.y,
-                            crtc.width as c_int,
-                            crtc.height as c_int,
+                            crtc.width as i32,
+                            crtc.height as i32,
                         ));
                         ac
                     });
@@ -310,16 +308,16 @@ impl Bar {
 
             // Use the attributes we created to make a window.
             self.window_id = (self.xlib.XCreateWindow)(
-                self.display,                // Display to use.
-                self.root,                   // Parent window.
-                self.x,                      // X position (from top-left.
-                self.y,                      // Y position (from top-left.
-                self.width as c_uint,        // Length of the bar in x direction.
-                self.height as c_uint,       // Height of the bar in y direction.
-                0,                           // Border-width.
-                xlib::CopyFromParent,        // Window depth.
-                xlib::InputOutput as c_uint, // Window class.
-                self.visual,                 // Visual type to use.
+                self.display,             // Display to use.
+                self.root,                // Parent window.
+                self.x,                   // X position (from top-left.
+                self.y,                   // Y position (from top-left.
+                self.width as u32,        // Length of the bar in x direction.
+                self.height as u32,       // Height of the bar in y direction.
+                0,                        // Border-width.
+                xlib::CopyFromParent,     // Window depth.
+                xlib::InputOutput as u32, // Window class.
+                self.visual,              // Visual type to use.
                 xlib::CWBackPixel | xlib::CWColormap | xlib::CWOverrideRedirect | xlib::CWEventMask, // Mask for which attributes are set.
                 &mut attributes, // Pointer to the attributes to use.
             );
@@ -467,8 +465,8 @@ impl Bar {
             &self.fonts,
             0,
             self.font_y,
-            self.height as c_uint,
-            self.underline_height as c_uint,
+            self.height as u32,
+            self.underline_height as u32,
         );
 
         // center string.
@@ -478,11 +476,10 @@ impl Bar {
             self.draw,
             &self.palette,
             &self.fonts,
-            (self.width - self.center_string.len(&self.xft, self.display, &self.fonts) as c_int)
-                / 2,
+            (self.width - self.center_string.len(&self.xft, self.display, &self.fonts) as i32) / 2,
             self.font_y,
-            self.height as c_uint,
-            self.underline_height as c_uint,
+            self.height as u32,
+            self.underline_height as u32,
         );
 
         // right string.
@@ -492,10 +489,10 @@ impl Bar {
             self.draw,
             &self.palette,
             &self.fonts,
-            self.width - self.right_string.len(&self.xft, self.display, &self.fonts) as c_int,
+            self.width - self.right_string.len(&self.xft, self.display, &self.fonts) as i32,
             self.font_y,
-            self.height as c_uint,
-            self.underline_height as c_uint,
+            self.height as u32,
+            self.underline_height as u32,
         );
     }
 
@@ -517,13 +514,12 @@ impl Bar {
 
     unsafe fn get_atom(&self, name: &str) -> xlib::Atom {
         let name = CString::new(name).unwrap();
-        (self.xlib.XInternAtom)(self.display, name.as_ptr() as *const c_char, xlib::False)
+        (self.xlib.XInternAtom)(self.display, name.as_ptr() as *const i8, xlib::False)
     }
 
     unsafe fn get_font(&self, name: &str) -> *mut xft::XftFont {
         let name = CString::new(name).unwrap();
-        let tmp =
-            (self.xft.XftFontOpenName)(self.display, self.screen, name.as_ptr() as *const c_char);
+        let tmp = (self.xft.XftFontOpenName)(self.display, self.screen, name.as_ptr() as *const i8);
         if tmp.is_null() {
             panic!("Font {} not found!!", name.to_str().unwrap())
         } else {
@@ -538,13 +534,13 @@ impl Bar {
             self.display,
             self.visual,
             self.cmap,
-            name.as_ptr() as *const c_char,
+            name.as_ptr() as *const i8,
             &mut tmp,
         );
         tmp
     }
 
-    unsafe fn get_xlib_color(&self, name: &str) -> c_ulong {
+    unsafe fn get_xlib_color(&self, name: &str) -> u64 {
         let name = CString::new(name).unwrap();
         let mut temp: xlib::XColor = init!();
         (self.xlib.XParseColor)(self.display, self.cmap, name.as_ptr(), &mut temp);
@@ -565,19 +561,19 @@ impl Bar {
         // Set the WM_NAME.
         let name = format!("Unibar_{}", self.name);
         let title = CString::new(name).unwrap();
-        (self.xlib.XStoreName)(self.display, self.window_id, title.as_ptr() as *mut c_char);
+        (self.xlib.XStoreName)(self.display, self.window_id, title.as_ptr() as *mut i8);
         // Set WM_CLASS
         let class: *mut xlib::XClassHint = (self.xlib.XAllocClassHint)();
         let cl_names = [
             CString::new("unibar").unwrap(),
             CString::new("Unibar").unwrap(),
         ];
-        (*class).res_name = cl_names[0].as_ptr() as *mut c_char;
-        (*class).res_class = cl_names[1].as_ptr() as *mut c_char;
+        (*class).res_name = cl_names[0].as_ptr() as *mut i8;
+        (*class).res_class = cl_names[1].as_ptr() as *mut i8;
         (self.xlib.XSetClassHint)(self.display, self.window_id, class);
         // Set WM_CLIENT_MACHINE
         let hn_size = libc::sysconf(libc::_SC_HOST_NAME_MAX) as libc::size_t;
-        let hn_buffer: *mut c_char = vec![0 as c_char; hn_size].as_mut_ptr();
+        let hn_buffer: *mut i8 = vec![0 as i8; hn_size].as_mut_ptr();
         libc::gethostname(hn_buffer, hn_size);
         let mut hn_list = [hn_buffer];
         let mut hn_text_prop: xlib::XTextProperty = init!();
@@ -593,12 +589,12 @@ impl Bar {
             xlib::XA_CARDINAL,
             32,
             xlib::PropModeReplace,
-            pid as *const c_uchar,
+            pid as *const u8,
             1,
         );
 
         // Set _NET_WM_DESKTOP
-        let dk_num = [0xFFFFFFFF as c_ulong].as_ptr();
+        let dk_num = [0xFFFFFFFF as u64].as_ptr();
         let wm_dktp_atom = self.get_atom("_NET_WM_DESKTOP");
         (self.xlib.XChangeProperty)(
             self.display,
@@ -607,7 +603,7 @@ impl Bar {
             xlib::XA_CARDINAL,
             32,
             xlib::PropModeReplace,
-            dk_num as *const c_uchar,
+            dk_num as *const u8,
             1,
         );
 
@@ -624,22 +620,22 @@ impl Bar {
             xlib::XA_ATOM,
             32,
             xlib::PropModeAppend,
-            state_atoms.as_ptr() as *const c_uchar,
+            state_atoms.as_ptr() as *const u8,
             2,
         );
 
         // Set the _NET_WM_STRUT[_PARTIAL]
         // TOP    = 2 -> height, 8 -> start x, 9 -> end x
         // BOTTOM = 3 -> height, 10 -> start x, 11 -> end x
-        let mut strut: [c_long; 12] = [0; 12];
+        let mut strut: [i64; 12] = [0; 12];
         if self.top {
-            strut[2] = self.height as c_long;
-            strut[8] = self.x as c_long;
-            strut[9] = (self.x + self.width - 1) as c_long;
+            strut[2] = self.height as i64;
+            strut[8] = self.x as i64;
+            strut[9] = (self.x + self.width - 1) as i64;
         } else {
-            strut[3] = self.height as c_long;
-            strut[10] = self.x as c_long;
-            strut[11] = (self.x + self.width - 1) as c_long;
+            strut[3] = self.height as i64;
+            strut[10] = self.x as i64;
+            strut[11] = (self.x + self.width - 1) as i64;
         }
         let strut_atoms = [
             self.get_atom("_NET_WM_STRUT_PARTIAL"),
@@ -652,7 +648,7 @@ impl Bar {
             xlib::XA_CARDINAL,
             32,
             xlib::PropModeReplace,
-            strut.as_ptr() as *const c_uchar,
+            strut.as_ptr() as *const u8,
             12,
         );
         (self.xlib.XChangeProperty)(
@@ -662,7 +658,7 @@ impl Bar {
             xlib::XA_CARDINAL,
             32,
             xlib::PropModeReplace,
-            strut.as_ptr() as *const c_uchar,
+            strut.as_ptr() as *const u8,
             4,
         );
 
@@ -676,7 +672,7 @@ impl Bar {
             xlib::XA_ATOM,
             32,
             xlib::PropModeReplace,
-            dock_atom.as_ptr() as *const c_uchar,
+            dock_atom.as_ptr() as *const u8,
             1,
         );
     }
