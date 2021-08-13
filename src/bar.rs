@@ -356,14 +356,14 @@ impl Bar {
             }
 
             // Check the input thread.
-            if let Ok(s) = rx.try_recv() {
+            if let Ok(string) = rx.try_recv() {
                 // Small kill marker for when I can't click.
-                if s == "QUIT NOW" {
+                if string == "QUIT NOW" {
                     break;
                 }
-                let split: Vec<String> = s.split("<|>").map(|s| s.to_owned()).collect();
+                let split: Vec<String> = string.split("<|>").map(|s| s.to_owned()).collect();
                 unsafe {
-                    match s.len() {
+                    match split.len() {
                         // If there are no seperators then we assign the whole string to the left
                         // bar section.
                         1 => {
@@ -428,7 +428,6 @@ impl Bar {
                             );
                         }
                     }
-                    self.clear_display();
                     self.draw_display();
                 }
             }
@@ -438,10 +437,9 @@ impl Bar {
                 if self.poll_events() {
                     #[allow(clippy::single_match)]
                     match self.event.type_ {
-                        xlib::Expose => {
-                            self.clear_display();
-                            self.draw_display();
-                        }
+                        // if the bar is show on the screen we draw content.
+                        xlib::Expose => self.draw_display(),
+                        // ignore all other events
                         _ => (),
                     }
                 }
@@ -456,6 +454,8 @@ impl Bar {
     }
 
     unsafe fn draw_display(&self) {
+        // clear display before we redraw
+        self.clear_display();
         // left string.
         self.left_string.draw(
             &self.xft,
