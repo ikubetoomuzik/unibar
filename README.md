@@ -10,7 +10,7 @@ Simple Xorg display bar written for speed and ease of use.
 ## Issues in progress:
 * [ ] Add additional comentary to the bar.rs file for the Xlib stuff.
 * [ ] Potentially start a new library on top of the Xlib C bindings to make this easier for others.
-* [ ] Add error handling and some basic error messages to the application.
+* [x] Add error handling and some basic error messages to the application.
 
 ## CLI Interface
 

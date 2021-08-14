@@ -4,10 +4,8 @@
 //
 
 use super::init;
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    mem,
-};
+use anyhow::Result;
+use std::collections::{hash_map::Entry, HashMap};
 use x11_dl::{xft, xlib, xrender::XGlyphInfo};
 
 /// Utility funtion so get the index of the first font that has a glyph for the provided char.
@@ -165,59 +163,60 @@ impl DisplayTemp {
         def: &HashMap<char, usize>,
         expl: &[DisplayTemp],
         text: &str,
-    ) -> Vec<DisplayTemp> {
-        expl.iter().fold(Vec::new(), |mut acc, dt| {
-            // usize::MAX is our key value to mean use default here.
-            if dt.idx == usize::MAX {
-                // Get the parts of the string within the DisplayTemp start and end.
-                let chunk: String = text.chars().take(dt.end).skip(dt.start).collect();
+    ) -> Result<Vec<DisplayTemp>> {
+        expl.iter()
+            .try_fold(Vec::new(), |mut acc, dt| -> Result<Vec<DisplayTemp>> {
+                // usize::MAX is our key value to mean use default here.
+                if dt.idx == usize::MAX {
+                    // Get the parts of the string within the DisplayTemp start and end.
+                    let chunk: String = text.chars().take(dt.end).skip(dt.start).collect();
 
-                // Temp value to use while counting.
-                let mut tmp = DisplayTemp::from(0, dt.start, dt.start);
+                    // Temp value to use while counting.
+                    let mut tmp = DisplayTemp::from(0, dt.start, dt.start);
 
-                // Generating the Vec of DisplayTemp values by folding over the chars.
-                let mut res = chunk.chars().fold(Vec::new(), |mut ac, ch| {
-                    // Get a copy of the default index for the char
-                    let ch_idx = *def.get(&ch).unwrap();
+                    // Generating the Vec of DisplayTemp values by folding over the chars.
+                    let mut res = chunk.chars().fold(Vec::new(), |mut ac, ch| {
+                        // Get a copy of the default index for the char
+                        let ch_idx = *def.get(&ch).expect("cant fail.");
 
-                    // If the default index is different from the tmp val index then we push our
-                    // tmp and start the new count.
-                    if ch_idx != tmp.idx {
-                        // We only do the push if we actually counted something. Otherwise just
-                        // start over by changing the font index.
-                        if tmp.start != tmp.end {
-                            ac.push(tmp);
-                            tmp.start = tmp.end;
-                            tmp.end = tmp.start + 1;
+                        // If the default index is different from the tmp val index then we push our
+                        // tmp and start the new count.
+                        if ch_idx != tmp.idx {
+                            // We only do the push if we actually counted something. Otherwise just
+                            // start over by changing the font index.
+                            if tmp.start != tmp.end {
+                                ac.push(tmp);
+                                tmp.start = tmp.end;
+                                tmp.end = tmp.start + 1;
+                            }
+                            tmp.idx = ch_idx;
+                        } else {
+                            // If the default is the same as the idx for our tmp val then we just increment
+                            // the end value.
+                            tmp.end += 1;
                         }
-                        tmp.idx = ch_idx;
-                    } else {
-                        // If the default is the same as the idx for our tmp val then we just increment
-                        // the end value.
-                        tmp.end += 1;
+
+                        // Gotta return something every loop.
+                        ac
+                    });
+
+                    // Once the loop is done we push the tmp value on the end if it counted and
+                    // characters.
+                    if tmp.start != tmp.end {
+                        res.push(tmp);
                     }
 
-                    // Gotta return something every loop.
-                    ac
-                });
-
-                // Once the loop is done we push the tmp value on the end if it counted and
-                // characters.
-                if tmp.start != tmp.end {
-                    res.push(tmp);
+                    // We use append here because it is possible to have generated multiple
+                    // DisplayTemps when using the default indexes.
+                    acc.append(&mut res);
+                } else {
+                    // If we are not using the defaults then we just push the value.
+                    acc.push(*dt);
                 }
 
-                // We use append here because it is possible to have generated multiple
-                // DisplayTemps when using the default indexes.
-                acc.append(&mut res);
-            } else {
-                // If we are not using the defaults then we just push the value.
-                acc.push(*dt);
-            }
-
-            // Once we pushed the old DisplayTemp or generated default ones we return our acc Vec.
-            acc
-        })
+                // Once we pushed the old DisplayTemp or generated default ones we return our acc Vec.
+                Ok(acc)
+            })
     }
 }
 
@@ -548,7 +547,7 @@ impl Input {
         def_font_map: &mut HashMap<char, usize>,
         colours: &ColourPalette,
         input: &str,
-    ) {
+    ) -> Result<()> {
         // clear self to start.
         self.clear();
 
@@ -745,7 +744,7 @@ impl Input {
             .collect();
 
         // Fill in the default font faces.
-        let merg_fcs = DisplayTemp::default_font_faces(def_font_map, &font_face_vec, &text);
+        let merg_fcs = DisplayTemp::default_font_faces(def_font_map, &font_face_vec, &text)?;
 
         // Gen the final FontDisplayInfo objects.
         let text_display = FontDisplayInfo::generate_list(&font_colour_vec, &merg_fcs);
@@ -765,5 +764,6 @@ impl Input {
         self.text_display = text_display;
         self.underlines = underlines;
         self.backgrounds = backgrounds;
+        Ok(())
     }
 }

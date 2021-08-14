@@ -9,7 +9,7 @@ use super::{
 };
 use anyhow::Result;
 use signal_hook::iterator::Signals;
-use std::{collections::HashMap, ffi::CString, io, mem, process, ptr, sync::mpsc, thread, time};
+use std::{collections::HashMap, ffi::CString, io, process, ptr, sync::mpsc, thread, time};
 use thiserror::Error;
 use x11_dl::{xft, xinerama, xlib, xrandr};
 
@@ -24,7 +24,8 @@ fn input_loop(stdin: io::Stdin, send: mpsc::Sender<String>) {
         let mut tmp = String::new();
         stdin.read_line(&mut tmp).expect("wont fail.");
         if !tmp.is_empty() {
-            send.send(tmp.trim().to_owned()).unwrap();
+            send.send(tmp.trim().to_owned())
+                .expect("If this fails then the bar is already gone.");
         }
     }
 }
@@ -125,7 +126,7 @@ impl Bar {
     /// Output:
     /// None, method alters the bar object itself, loading real values into the placeholders
     /// generated in Bar::new().
-    pub fn load_config(&mut self, conf: Config) {
+    pub fn load_config(&mut self, conf: Config) -> Result<()> {
         // As per tradition, name first!
         self.name = conf.name;
         // We are setting x to 0 for now but we check for other monitors later.
@@ -222,42 +223,51 @@ impl Bar {
                 // translating between weird c structs and pretty rust ones.
                 // we create a range iterator as large as the number of monitors and use pointer
                 // arithmetic to collect those into a Rust Vec.
-                let mons = (0..num_mon as usize).fold(Vec::new(), |mut acc, i| {
-                    let m = *mons.add(i);
-                    // The way xrandr organizes information probably makes sense if you wrote the
-                    // library. or maybe if you can find docs because they either dont exist or
-                    // suck. Basically every Xrandr Monitor has outputs. Unless you have multiple cords
-                    // from pc to monitor you only have one output.
-                    let mut tmp = (0..m.noutput as usize).fold(Vec::new(), |mut ac, i| {
-                        let output = *m.outputs.add(i);
-                        let info = *(xrr.XRRGetOutputInfo)(dpy, resources, output);
-                        // Inside the output object we have another object called CRTC.
-                        let crtc = *(xrr.XRRGetCrtcInfo)(dpy, resources, info.crtc);
-                        // This library returns strings just like arrays, you get a pointer to the
-                        // first char and a count. So we do the same iteration trick to collect
-                        // into a string.
-                        let name = (0..info.nameLen as usize).fold(Vec::new(), |mut acc, j| {
-                            acc.push(*info.name.add(j) as u8);
-                            acc
-                        });
-                        // Inside the CRTC is information that an actual human or basic ass application
-                        // like this may need. So we grab what we need there and push a tuple
-                        // containing the info into the vec, instead of the full monitor object, to
-                        // avoid all this abstraction craziness later.
-                        ac.push((
-                            String::from_utf8(name).unwrap(),
-                            crtc.x,
-                            crtc.y,
-                            crtc.width as i32,
-                            crtc.height as i32,
-                        ));
-                        ac
-                    });
-                    // Append the tmp vec of usable monitor info to the result and finally move
-                    // onto the next Monitor.
-                    acc.append(&mut tmp);
-                    acc
-                });
+                // plus a quick type alias to make the code signatures easier to read.
+                type MonitorInfoList = Vec<(String, i32, i32, i32, i32)>;
+                let mons = (0..num_mon as usize).try_fold(
+                    Vec::new(),
+                    |mut acc, i| -> Result<MonitorInfoList> {
+                        let m = *mons.add(i);
+                        // The way xrandr organizes information probably makes sense if you wrote the
+                        // library. or maybe if you can find docs because they either dont exist or
+                        // suck. Basically every Xrandr Monitor has outputs. Unless you have multiple cords
+                        // from pc to monitor you only have one output.
+                        let mut tmp = (0..m.noutput as usize).try_fold(
+                            Vec::new(),
+                            |mut ac, j| -> Result<MonitorInfoList> {
+                                let output = *m.outputs.add(j);
+                                let info = *(xrr.XRRGetOutputInfo)(dpy, resources, output);
+                                // Inside the output object we have another object called CRTC.
+                                let crtc = *(xrr.XRRGetCrtcInfo)(dpy, resources, info.crtc);
+                                // This library returns strings just like arrays, you get a pointer to the
+                                // first char and a count. So we do the same iteration trick to collect
+                                // into a string.
+                                let name =
+                                    (0..info.nameLen as usize).fold(Vec::new(), |mut acc, k| {
+                                        acc.push(*info.name.add(k) as u8);
+                                        acc
+                                    });
+                                // Inside the CRTC is information that an actual human or basic ass application
+                                // like this may need. So we grab what we need there and push a tuple
+                                // containing the info into the vec, instead of the full monitor object, to
+                                // avoid all this abstraction craziness later.
+                                ac.push((
+                                    String::from_utf8(name)?,
+                                    crtc.x,
+                                    crtc.y,
+                                    crtc.width as i32,
+                                    crtc.height as i32,
+                                ));
+                                Ok(ac)
+                            },
+                        )?;
+                        // Append the tmp vec of usable monitor info to the result and finally move
+                        // onto the next Monitor.
+                        acc.append(&mut tmp);
+                        Ok(acc)
+                    },
+                )?;
                 match mons.iter().find(|m| m.0 == self.monitor) {
                     Some(m) => {
                         self.x = m.1;
@@ -275,28 +285,42 @@ impl Bar {
             }
 
             self.underline_height = conf.ul_height;
-            self.fonts = conf.fonts.iter().map(|fs| self.get_font(fs)).collect();
+            self.fonts = conf.fonts.iter().try_fold(
+                Vec::new(),
+                |mut acc, fs| -> Result<Vec<*mut xft::XftFont>> {
+                    acc.push(self.get_font(fs)?);
+                    Ok(acc)
+                },
+            )?;
             self.font_y = conf.font_y;
-            self.back_colour = self.get_xlib_color(&conf.back_color);
-            self.palette.font = conf
-                .ft_clrs
-                .iter()
-                .map(|s| self.get_xft_colour(s))
-                .collect();
-            self.palette.background = conf
-                .bg_clrs
-                .iter()
-                .map(|s| self.get_xft_colour(s))
-                .collect();
-            self.palette.underline = conf
-                .ul_clrs
-                .iter()
-                .map(|s| self.get_xft_colour(s))
-                .collect();
+            self.back_colour = self.get_xlib_color(&conf.back_color)?;
+            type XftColorList = Vec<xft::XftColor>;
+            self.palette.font =
+                conf.ft_clrs
+                    .iter()
+                    .try_fold(Vec::new(), |mut acc, s| -> Result<XftColorList> {
+                        acc.push(self.get_xft_colour(s)?);
+                        Ok(acc)
+                    })?;
+            self.palette.background =
+                conf.bg_clrs
+                    .iter()
+                    .try_fold(Vec::new(), |mut acc, s| -> Result<XftColorList> {
+                        acc.push(self.get_xft_colour(s)?);
+                        Ok(acc)
+                    })?;
+            self.palette.underline =
+                conf.ul_clrs
+                    .iter()
+                    .try_fold(Vec::new(), |mut acc, s| -> Result<XftColorList> {
+                        acc.push(self.get_xft_colour(s)?);
+                        Ok(acc)
+                    })?;
         }
+        Ok(())
     }
 
-    pub fn init(&mut self) {
+    pub fn init(&mut self) -> Result<()> {
         unsafe {
             // Manually set the attributes here so we can get more fine grain control.
             let mut attributes: xlib::XSetWindowAttributes = init!();
@@ -324,14 +348,15 @@ impl Bar {
             self.draw =
                 (self.xft.XftDrawCreate)(self.display, self.window_id, self.visual, self.cmap);
 
-            self.set_atoms();
+            self.set_atoms()?;
 
             // Map it up.
             (self.xlib.XMapWindow)(self.display, self.window_id);
         }
+        Ok(())
     }
 
-    pub fn event_loop(&mut self) {
+    pub fn event_loop(&mut self) -> Result<()> {
         // Input thread. Has to be seperate to not block xlib events.
         let (tx, rx) = mpsc::channel();
         // If we don't call the stdin function in this thread and pass it then sometimes we lose
@@ -344,8 +369,7 @@ impl Bar {
             signal_hook::SIGINT,
             signal_hook::SIGQUIT,
             signal_hook::SIGHUP,
-        ])
-        .unwrap();
+        ])?;
 
         loop {
             // Check signals.
@@ -374,7 +398,7 @@ impl Bar {
                                 &mut self.font_map,
                                 &self.palette,
                                 &split[0],
-                            );
+                            )?;
                             self.center_string.clear();
                             self.right_string.clear();
                         }
@@ -388,7 +412,7 @@ impl Bar {
                                 &mut self.font_map,
                                 &self.palette,
                                 &split[0],
-                            );
+                            )?;
                             self.center_string.clear();
                             self.right_string.parse_string(
                                 &self.xft,
@@ -397,7 +421,7 @@ impl Bar {
                                 &mut self.font_map,
                                 &self.palette,
                                 &split[1],
-                            );
+                            )?;
                         }
                         // If there are two or more seperators then we are only gonna use the first
                         // three, assign the first to left, second to center, and third to right.
@@ -409,7 +433,7 @@ impl Bar {
                                 &mut self.font_map,
                                 &self.palette,
                                 &split[0],
-                            );
+                            )?;
                             self.center_string.parse_string(
                                 &self.xft,
                                 self.display,
@@ -417,7 +441,7 @@ impl Bar {
                                 &mut self.font_map,
                                 &self.palette,
                                 &split[1],
-                            );
+                            )?;
                             self.right_string.parse_string(
                                 &self.xft,
                                 self.display,
@@ -425,7 +449,7 @@ impl Bar {
                                 &mut self.font_map,
                                 &self.palette,
                                 &split[2],
-                            );
+                            )?;
                         }
                     }
                     self.draw_display();
@@ -447,6 +471,7 @@ impl Bar {
 
             thread::sleep(time::Duration::from_millis(100));
         }
+        Ok(())
     }
 
     unsafe fn clear_display(&self) {
@@ -496,7 +521,7 @@ impl Bar {
         );
     }
 
-    pub fn close(&mut self, code: i32) {
+    pub fn close(&mut self, code: i32) -> ! {
         println!("\nShutting down...");
         unsafe {
             self.palette
@@ -512,23 +537,27 @@ impl Bar {
         process::exit(code);
     }
 
-    unsafe fn get_atom(&self, name: &str) -> xlib::Atom {
-        let name = CString::new(name).unwrap();
-        (self.xlib.XInternAtom)(self.display, name.as_ptr() as *const i8, xlib::False)
+    unsafe fn get_atom(&self, name: &str) -> Result<xlib::Atom> {
+        let name = CString::new(name)?;
+        Ok((self.xlib.XInternAtom)(
+            self.display,
+            name.as_ptr() as *const i8,
+            xlib::False,
+        ))
     }
 
-    unsafe fn get_font(&self, name: &str) -> *mut xft::XftFont {
-        let name = CString::new(name).unwrap();
+    unsafe fn get_font(&self, name: &str) -> Result<*mut xft::XftFont> {
+        let name = CString::new(name)?;
         let tmp = (self.xft.XftFontOpenName)(self.display, self.screen, name.as_ptr() as *const i8);
         if tmp.is_null() {
-            panic!("Font {} not found!!", name.to_str().unwrap())
+            panic!("Font {} not found!!", name.to_str()?)
         } else {
-            tmp
+            Ok(tmp)
         }
     }
 
-    unsafe fn get_xft_colour(&self, name: &str) -> xft::XftColor {
-        let name = CString::new(name).unwrap();
+    unsafe fn get_xft_colour(&self, name: &str) -> Result<xft::XftColor> {
+        let name = CString::new(name)?;
         let mut tmp: xft::XftColor = init!();
         (self.xft.XftColorAllocName)(
             self.display,
@@ -537,15 +566,15 @@ impl Bar {
             name.as_ptr() as *const i8,
             &mut tmp,
         );
-        tmp
+        Ok(tmp)
     }
 
-    unsafe fn get_xlib_color(&self, name: &str) -> u64 {
-        let name = CString::new(name).unwrap();
+    unsafe fn get_xlib_color(&self, name: &str) -> Result<u64> {
+        let name = CString::new(name)?;
         let mut temp: xlib::XColor = init!();
         (self.xlib.XParseColor)(self.display, self.cmap, name.as_ptr(), &mut temp);
         (self.xlib.XAllocColor)(self.display, self.cmap, &mut temp);
-        temp.pixel
+        Ok(temp.pixel)
     }
 
     unsafe fn poll_events(&mut self) -> bool {
@@ -557,17 +586,14 @@ impl Bar {
         ) == 1
     }
 
-    unsafe fn set_atoms(&mut self) {
+    unsafe fn set_atoms(&mut self) -> Result<()> {
         // Set the WM_NAME.
         let name = format!("Unibar_{}", self.name);
-        let title = CString::new(name).unwrap();
+        let title = CString::new(name)?;
         (self.xlib.XStoreName)(self.display, self.window_id, title.as_ptr() as *mut i8);
         // Set WM_CLASS
         let class: *mut xlib::XClassHint = (self.xlib.XAllocClassHint)();
-        let cl_names = [
-            CString::new("unibar").unwrap(),
-            CString::new("Unibar").unwrap(),
-        ];
+        let cl_names = [CString::new("unibar")?, CString::new("Unibar")?];
         (*class).res_name = cl_names[0].as_ptr() as *mut i8;
         (*class).res_class = cl_names[1].as_ptr() as *mut i8;
         (self.xlib.XSetClassHint)(self.display, self.window_id, class);
@@ -581,7 +607,7 @@ impl Bar {
         (self.xlib.XSetWMClientMachine)(self.display, self.window_id, &mut hn_text_prop);
         // Set _NET_WM_PID
         let pid = [process::id()].as_ptr();
-        let wm_pid_atom = self.get_atom("_NET_WM_PID");
+        let wm_pid_atom = self.get_atom("_NET_WM_PID")?;
         (self.xlib.XChangeProperty)(
             self.display,
             self.window_id,
@@ -595,7 +621,7 @@ impl Bar {
 
         // Set _NET_WM_DESKTOP
         let dk_num = [0xFFFFFFFF as u64].as_ptr();
-        let wm_dktp_atom = self.get_atom("_NET_WM_DESKTOP");
+        let wm_dktp_atom = self.get_atom("_NET_WM_DESKTOP")?;
         (self.xlib.XChangeProperty)(
             self.display,
             self.window_id,
@@ -608,10 +634,10 @@ impl Bar {
         );
 
         // Change _NET_WM_STATE
-        let wm_state_atom = self.get_atom("_NET_WM_STATE");
+        let wm_state_atom = self.get_atom("_NET_WM_STATE")?;
         let state_atoms = [
-            self.get_atom("_NET_WM_STATE_STICKY"),
-            self.get_atom("_NET_WM_STATE_ABOVE"),
+            self.get_atom("_NET_WM_STATE_STICKY")?,
+            self.get_atom("_NET_WM_STATE_ABOVE")?,
         ];
         (self.xlib.XChangeProperty)(
             self.display,
@@ -638,8 +664,8 @@ impl Bar {
             strut[11] = (self.x + self.width - 1) as i64;
         }
         let strut_atoms = [
-            self.get_atom("_NET_WM_STRUT_PARTIAL"),
-            self.get_atom("_NET_WM_STRUT"),
+            self.get_atom("_NET_WM_STRUT_PARTIAL")?,
+            self.get_atom("_NET_WM_STRUT")?,
         ];
         (self.xlib.XChangeProperty)(
             self.display,
@@ -663,8 +689,8 @@ impl Bar {
         );
 
         // Set the _NET_WM_WINDOW_TYPE atom
-        let win_type_atom = self.get_atom("_NET_WM_WINDOW_TYPE");
-        let dock_atom = [self.get_atom("_NET_WM_WINDOW_TYPE_DOCK")];
+        let win_type_atom = self.get_atom("_NET_WM_WINDOW_TYPE")?;
+        let dock_atom = [self.get_atom("_NET_WM_WINDOW_TYPE_DOCK")?];
         (self.xlib.XChangeProperty)(
             self.display,
             self.window_id,
@@ -675,5 +701,6 @@ impl Bar {
             dock_atom.as_ptr() as *const u8,
             1,
         );
+        Ok(())
     }
 }

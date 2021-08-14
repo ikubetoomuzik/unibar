@@ -1,0 +1,4 @@
+#! /bin/bash
+
+# using bash process substution so the script is killed when unibar dies
+cargo run -- "$@" < <($HOME/.config/unibar/input_$1.zsh)

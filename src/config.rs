@@ -8,6 +8,7 @@ use anyhow::Result;
 use clap::clap_app;
 use dirs::config_dir;
 use std::fs::read_to_string;
+use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Could not generate config.")]
@@ -75,7 +76,9 @@ impl Config {
         .setting(clap::AppSettings::ColoredHelp) // Make it look pretty.
         .get_matches(); // We actually only take the matches because we don't need clap for anything else.
                         // Get the name first. It's required.
-        let name = matches.value_of("NAME").unwrap();
+        let name = matches
+            .value_of("NAME")
+            .expect("Clap verifies this arguement is present before we get to this point.");
         // Decide what the default config file will be.
         let default_conf = match config_dir() {
             // We look in XDG_CONFIG_DIR or $HOME/.config for a unibar folder with unibar.conf
@@ -83,14 +86,17 @@ impl Config {
             Some(mut d) => {
                 let config = format!("unibar/{}.conf", name);
                 d.push(config);
-                String::from(d.to_str().unwrap())
+                d
             }
             // If neither of those dirs are a thing, then we just set an empty string.
-            None => String::new(),
+            None => PathBuf::new(),
         };
         // If a explicit config file was set in the CLI args then we use that instead of our
         // default.
-        let conf_opt = matches.value_of("CONFIG").unwrap_or(&default_conf);
+        let conf_opt = match matches.value_of("CONFIG") {
+            Some(conf) => PathBuf::from(conf),
+            None => default_conf,
+        };
         // Whatever we chose in the previous step we now try to load that config file.
         // IF we are loading a config file then we use the value generated from bar name, if not we use
         // the default Config.
@@ -125,15 +131,19 @@ impl Config {
         Ok(tmp)
     }
 
-    pub fn from_file(file: &str) -> Config {
+    pub fn from_file(file: PathBuf) -> Config {
         let mut tmp = Config::default();
 
         // Read the config file to a string.
-        let conf_file = match read_to_string(file) {
+        let conf_file = match read_to_string(&file) {
             Ok(s) => s,
             Err(e) => {
                 // If we can't read it, let the user know but continue on with the default.
-                eprintln!("Could not read config file!\nFile: {}\nError: {}", file, e);
+                eprintln!(
+                    "Could not read config file!\nFile: {}\nError: {}",
+                    file.display(),
+                    e
+                );
                 return tmp;
             }
         };
