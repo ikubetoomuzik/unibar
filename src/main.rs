@@ -12,7 +12,7 @@ fn main() -> Result<()> {
     // Generate a new empty bar object.
     let mut bar = Bar::new()?;
 
-    // Alter the bar based on the config.
+    // Apply the configuration loaded previously.
     bar.load_config(conf)?;
 
     // Initialize the window and set any specific Atoms needed to get the bar displayed correctly.
