@@ -6,7 +6,7 @@ use super::{
     config::Config,
     init,
     input::{ColourPalette, Input},
-    kill_me::KillMeModule,
+    optional::kill_me::KillMeModule,
 };
 use clap::clap_app;
 use dirs::config_dir;
