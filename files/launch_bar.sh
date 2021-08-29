@@ -1,3 +1,5 @@
 #! /bin/sh
 
-cargo run -- "$@" < <($HOME/.config/unibar/input_$1.zsh) 
+pathname=$(dirname $0);
+
+cargo run -- -c $pathname/$1.conf "$@" < <($pathname/input_$1.zsh) 

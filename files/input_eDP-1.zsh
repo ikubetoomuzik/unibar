@@ -1,7 +1,9 @@
 #! /bin/zsh
 
-DEFAULT_DIR=$(dirname $(realpath $0));
-SPACING="     ";
+BRIGHT_DIR="/sys/class/backlight/intel_backlight";
+DEFAULT_DIR="$HOME/.config/unibar";
+SPACING="    ";
+
 
 # Args:
 # $1 => drive name to search for.
@@ -21,8 +23,82 @@ fs_storage() {
   fi
 }
 
+# Args: 
+# $1 => Network device name.
+net_info() {
+  case "${1:0:1}" in
+    e)
+      ip a | grep -e ".*inet .*$1$" | tr "/" " " | read _ new_info _;
+      connected_sym=""
+      disconnected_sym=""
+      ;;
+    w)
+      iw dev "$1" info | grep "ssid " | read _ new_info;
+      connected_sym=""
+      disconnected_sym=""
+      ;;
+  esac
+
+  if [ -z "$new_info" ]; then
+    printf "{F1}$disconnected_sym{/F} disconnected."
+  else
+    printf "$connected_sym{F1} $new_info{/F}";
+  fi
+}
+
+# Args none.
+brightness() {
+  max=$(($(< "$BRIGHT_DIR/max_brightness") - 100));
+  cur=$(($(< "$BRIGHT_DIR/brightness") - 100));
+  perc=$((100 * $cur / $max));
+  if [ $perc -ge 50 ]; then
+    spc="";
+    sym="";
+  elif [ $perc -lt 10 ]; then
+    spc=" ";
+    sym="";
+  else
+    spc="";
+    sym="";
+  fi
+
+  printf "$sym{F1} $spc$perc%%{/F}";
+}
+
+# Args none.
+battery() {
+  acpi | read _ _ chrge bat_per _;
+  chrge="${chrge//,}"
+  bat_per="${${bat_per//,}//\%}"
+  bat_syms=("" "" "");
+
+  case "$chrge" in
+    Charging)
+      new_count=$(($1 + 1));
+      bat_ul=1;
+      ;;
+    Discharging)
+      new_count=$(($1 - 1));
+      if [ $bat_per -le 15 ]; then
+        bat_ul=3;
+      else
+        bat_ul=2;
+      fi
+      ;;
+  esac
+
+  bat_sym="${bat_syms[$1]}"
+
+  if [ $bat_per -gt 97 ]; then
+    bat_per=100;
+    bat_sym="";
+  fi
+
+  printf "$new_count{H$bat_ul}$bat_sym{F1} $bat_per%%{/HF}";
+}
+
 # start the bspwm watching script here.
-if ! pgrep -x bspwm_report_fo > /dev/null; then
+if ! pgrep -x bspwm_subscribe > /dev/null; then
   $DEFAULT_DIR/bspwm_subscribe.zsh &
 fi
 
@@ -55,8 +131,8 @@ while [ 1 -gt 0 ]; do
   new_focus_win_name=$(xdotool getwindowname "$focus_win" 2> /dev/null);
   if [ "$focus_win_name" != "$new_focus_win_name" ]; then
     focus_win_name=$new_focus_win_name;
-    if [ ${#focus_win_name} -gt 90 ]; then
-      win_name="$focus_win_name[1,87]...";
+    if [ ${#focus_win_name} -gt 42 ]; then
+      win_name="$focus_win_name[1,39]...";
     else
       win_name="$focus_win_name";
     fi
@@ -76,6 +152,24 @@ while [ 1 -gt 0 ]; do
   fi
   ##########################################################
 
+  # Every half second.
+  if [ $(($count % 8)) -eq 0 ]; then
+    ########################################################
+    # Battery bit
+    if [ -z "$bat_count" ] || [ $bat_count -gt 3 ]; then
+      bat_count=1;
+    elif [ $bat_count -lt 1 ]; then
+      bat_count=3;
+    fi
+    return_val=$(battery $bat_count);
+    bat_count=${return_val:0:1};
+    new_bat_display=${return_val:1};
+    if [ "$bat_display" != "$new_bat_display" ]; then
+      bat_display=$new_bat_display;
+      skip=0;
+    fi
+    ########################################################
+  fi
   # only every second.
   ##########################################################
   if [ $(($count % 10)) -eq 0 ] || [ $count -lt 0 ]; then
@@ -94,20 +188,24 @@ while [ 1 -gt 0 ]; do
     ########################################################
     ########################################################
     # Network bit.
-    ip a | grep -e ".*inet .*eno1$" | tr "/" " " | read x new_ip x;
-    if [ "$ip" != "$new_ip" ]; then
-      ip=$new_ip;
-      if [ "$ip" = "" ]; then
-        ip_display="{B0}{F1}{/F} disconnected.{/B}"
-      else
-        ip_display="{F1} $ip{/F}";
-      fi
+    new_ip_display=$(net_info "wlp58s0");
+    if [ "$ip_display" != "$new_ip_display" ]; then
+      ip_display=$new_ip_display;
       skip=0;
     fi
     ########################################################
   fi
   ##########################################################
 
+  ######################################
+  # Brightness bit.
+  new_bright_display=$(brightness);
+  if [ "$bright_display" != "$new_bright_display" ]; then
+    bright_display=$new_bright_display;
+    skip=0;
+  fi
+  ######################################
+  
   ######################################
   # Volume bit.
   # Get current volume.
@@ -178,11 +276,11 @@ while [ 1 -gt 0 ]; do
     # Add the section seperator.
     string+="<|>"
     # Set the center aligned section.
-    string+="$focus_win_display";
+    string+="{}";
     # Add the section seperator.
     string+="<|>"
     # Set the right aligned section.
-    string+="  $root_percent$SPACING$home_percent$SPACING$vol_display$SPACING$ip_display$SPACING$time_display";
+    string+="$focus_win_display$SPACING$root_percent$SPACING$home_percent$SPACING$bright_display$SPACING$vol_display$SPACING$ip_display$SPACING$bat_display$SPACING$time_display";
 
     # Print the string.
     echo "$string";
