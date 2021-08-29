@@ -23,5 +23,8 @@ mod config;
 /// screen.
 mod input;
 
+/// Unibar module to give the bar process ids to kill.
+mod kill_me;
+
 /// To be used by the binary crate.
 pub use bar::{gen_config, Bar};

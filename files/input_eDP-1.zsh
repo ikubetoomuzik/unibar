@@ -38,6 +38,9 @@ sleep 1;
 # Set the count to 0 to start.
 count=-10;
 
+# before we start the loop, ask unibar to kill us.
+echo "PLEASE KILL:$$";
+
 while [ 1 -gt 0 ]; do
   # Skip defaults to false.
   skip=1

@@ -9,17 +9,18 @@ use std::os::raw::*;
 
 #[derive(Debug)]
 pub struct Config {
-    pub name: String,         // name of the bar
-    pub top: bool,            // top or bottom
-    pub monitor: String,      // xinerama montior list index for monitor
-    pub height: c_int,        // width or height of bar depending on pos.
-    pub ul_height: c_int,     // width or height of bar depending on pos.
-    pub fonts: Vec<String>,   // Vec of strings listing the fonts in FcLookup form.
-    pub font_y: c_int,        // pixel offset from the top of bar to bottom font.
-    pub back_color: String,   // String of the hex color.
-    pub ft_clrs: Vec<String>, // String of the hex color.
-    pub bg_clrs: Vec<String>, // String of the hex color.
-    pub ul_clrs: Vec<String>, // String of the hex color.
+    pub name: String,                // name of the bar
+    pub top: bool,                   // top or bottom
+    pub monitor: String,             // xinerama montior list index for monitor
+    pub height: c_int,               // width or height of bar depending on pos.
+    pub ul_height: c_int,            // width or height of bar depending on pos.
+    pub fonts: Vec<String>,          // Vec of strings listing the fonts in FcLookup form.
+    pub font_y: c_int,               // pixel offset from the top of bar to bottom font.
+    pub back_color: String,          // String of the hex color.
+    pub ft_clrs: Vec<String>,        // String of the hex color.
+    pub bg_clrs: Vec<String>,        // String of the hex color.
+    pub ul_clrs: Vec<String>,        // String of the hex color.
+    pub kill_me_cmd: Option<String>, // Command to run on each pid for kill_me module.
 }
 
 impl Config {
@@ -36,6 +37,7 @@ impl Config {
             ft_clrs: vec![String::from("#FFFFFF")],
             bg_clrs: vec![String::from("#0000FF")],
             ul_clrs: vec![String::from("#FF0000")],
+            kill_me_cmd: None,
         }
     }
 
@@ -137,6 +139,7 @@ impl Config {
             "ft_colour" => self.ft_clrs.push(val),
             "background_colour" => self.bg_clrs.push(val),
             "highlight_colour" => self.ul_clrs.push(val),
+            "kill_me_cmd" => self.kill_me_cmd = Some(val),
             _ => eprintln!("Invalid option -> {}", opt),
         }
     }

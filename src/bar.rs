@@ -6,6 +6,7 @@ use super::{
     config::Config,
     init,
     input::{ColourPalette, Input},
+    kill_me::KillMeModule,
 };
 use clap::clap_app;
 use dirs::config_dir;
@@ -54,6 +55,7 @@ pub fn gen_config() -> Config {
         (@arg FT_COLOURS:     -F --ftcolours ... +takes_value "overrides config file font colours")
         (@arg BG_COLOURS:     -B --bgcolours ... +takes_value "overrides config file background highlight colours")
         (@arg UL_COLOURS:     -U --ulcolours ... +takes_value "overrides config file underline highlight colours")
+        (@arg KILL_ME_CMD:    -k --killme       +takes_value "enables my \"Kill Me\" module and sets the command to use")
         )
         .help_short("H") // We are using the lowercase h to set height.
         .setting(clap::AppSettings::ColoredHelp) // Make it look pretty.
@@ -100,6 +102,7 @@ pub fn gen_config() -> Config {
         "HEIGHT",
         "UNDERLINE",
         "FONT_Y",
+        "KILL_ME_CMD",
     ] {
         if let Some(s) = matches.value_of(opt) {
             tmp.change_option(opt, s);
@@ -143,6 +146,7 @@ pub struct Bar {
     left_string: Input,
     center_string: Input,
     right_string: Input,
+    kill_me: Option<KillMeModule>,
 }
 
 impl Bar {
@@ -204,6 +208,7 @@ impl Bar {
                 left_string: Input::empty(),
                 center_string: Input::empty(),
                 right_string: Input::empty(),
+                kill_me: None,
             }
         }
     }
@@ -226,6 +231,8 @@ impl Bar {
         self.height = conf.height;
         // Duh..
         self.top = conf.top;
+        // load kill_me module settings
+        self.kill_me = conf.kill_me_cmd.map(|cmd| KillMeModule::new(cmd));
         // Now we do all the yucky C library stuff in a big unsafe block.
         unsafe {
             // Width for now is the full XDisplay width.
@@ -454,6 +461,18 @@ impl Bar {
                 if s == "QUIT NOW" {
                     break;
                 }
+
+                // messy way to check if kill me option is enabled
+                if s.starts_with("PLEASE KILL:") {
+                    if let Some(kill_me) = self.kill_me.as_mut() {
+                        if let Some(id_str) = s.split(':').skip(1).next() {
+                            if let Ok(id) = id_str.parse::<u32>() {
+                                kill_me.push(id);
+                            }
+                        }
+                    }
+                }
+
                 unsafe {
                     match s.matches("<|>").count() {
                         // If there are no seperators then we assign the whole string to the left
@@ -597,6 +616,7 @@ impl Bar {
             (self.xlib.XDestroyWindow)(self.display, self.window_id);
             (self.xlib.XCloseDisplay)(self.display);
         }
+        self.kill_me.as_mut().map(|km| km.kill_all());
         process::exit(code);
     }
 
