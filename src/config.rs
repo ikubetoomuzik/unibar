@@ -4,18 +4,25 @@
 
 // gonna start by implementing the loading from file bits.
 
+use anyhow::Result;
+use clap::clap_app;
+use dirs::config_dir;
 use std::fs::read_to_string;
-use std::os::raw::*;
+use std::path::PathBuf;
+
+#[derive(Debug, thiserror::Error)]
+#[error("Could not generate config.")]
+pub struct Error;
 
 #[derive(Debug)]
 pub struct Config {
     pub name: String,                // name of the bar
     pub top: bool,                   // top or bottom
     pub monitor: String,             // xinerama montior list index for monitor
-    pub height: c_int,               // width or height of bar depending on pos.
-    pub ul_height: c_int,            // width or height of bar depending on pos.
+    pub height: i32,                 // width or height of bar depending on pos.
+    pub ul_height: i32,              // width or height of bar depending on pos.
     pub fonts: Vec<String>,          // Vec of strings listing the fonts in FcLookup form.
-    pub font_y: c_int,               // pixel offset from the top of bar to bottom font.
+    pub font_y: i32,                 // pixel offset from the top of bar to bottom font.
     pub back_color: String,          // String of the hex color.
     pub ft_clrs: Vec<String>,        // String of the hex color.
     pub bg_clrs: Vec<String>,        // String of the hex color.
@@ -41,15 +48,104 @@ impl Config {
         }
     }
 
-    pub fn from_file(file: &str) -> Config {
+    /// Making a full Config by parsing the CLI arguments, parsing the config file, and mashing
+    /// them together to create whatever.
+    ///
+    /// # Output
+    /// Main Config to be used for the Bar.
+    pub fn from_args() -> Result<Config> {
+        // Create an App object for parsing CLI args. Thankfully the library makes the code pretty
+        // readable and there is no runtime penalty.
+        let matches = clap_app!(Unibar =>
+        (version: env!("CARGO_PKG_VERSION"))
+        (author: "Curtis Jones <mail@curtisjones.ca>")
+        (about: "Simple Xorg display bar!")
+        (@arg NO_CONFIG:      -C --noconfig                   "Tells Unibar to skip loading a config file.")
+        (@arg CONFIG:         -c --config        +takes_value "Sets a custom config file")
+        (@arg NAME:           *                  +takes_value "Sets name and is required")
+        (@arg POSITION:       -p --position      +takes_value "overrides config file position option")
+        (@arg MONITOR:        -m --monitor       +takes_value "sets the monitor number to use. starts at 1")
+        (@arg DEF_BACKGROUND: -b --background    +takes_value "overrides config file default background")
+        (@arg HEIGHT:         -h --height        +takes_value "overrides config file bar height option")
+        (@arg UNDERLINE:      -u --underline     +takes_value "overrides config file underline height option")
+        (@arg FONT_Y:         -y --fonty         +takes_value "overrides config file font y offset option")
+        (@arg FONTS:          -f --fonts     ... +takes_value "overrides config file font options")
+        (@arg FT_COLOURS:     -F --ftcolours ... +takes_value "overrides config file font colours")
+        (@arg BG_COLOURS:     -B --bgcolours ... +takes_value "overrides config file background highlight colours")
+        (@arg UL_COLOURS:     -U --ulcolours ... +takes_value "overrides config file underline highlight colours")
+        )
+        .help_short("H") // We are using the lowercase h to set height.
+        .setting(clap::AppSettings::ColoredHelp) // Make it look pretty.
+        .get_matches(); // We actually only take the matches because we don't need clap for anything else.
+                        // Get the name first. It's required.
+        let name = matches
+            .value_of("NAME")
+            .expect("Clap verifies this arguement is present before we get to this point.");
+        // Decide what the default config file will be.
+        let default_conf = match config_dir() {
+            // We look in XDG_CONFIG_DIR or $HOME/.config for a unibar folder with unibar.conf
+            // avaiable.
+            Some(mut d) => {
+                let config = format!("unibar/{}.conf", name);
+                d.push(config);
+                d
+            }
+            // If neither of those dirs are a thing, then we just set an empty string.
+            None => PathBuf::new(),
+        };
+        // If a explicit config file was set in the CLI args then we use that instead of our
+        // default.
+        let conf_opt = match matches.value_of("CONFIG") {
+            Some(conf) => PathBuf::from(conf),
+            None => default_conf,
+        };
+        // Whatever we chose in the previous step we now try to load that config file.
+        // IF we are loading a config file then we use the value generated from bar name, if not we use
+        // the default Config.
+        let mut tmp = if matches.is_present("NO_CONFIG") {
+            Config::default()
+        } else {
+            Config::from_file(conf_opt)
+        };
+        // Set the name first as we got it earlier.
+        tmp.change_option("NAME", name);
+        // Now we alter the loaded Config object with the CLI args.
+        // First we check all of the options that only take one val.
+        for opt in &[
+            "MONITOR",
+            "POSITION",
+            "DEF_BACKGROUND",
+            "HEIGHT",
+            "UNDERLINE",
+            "FONT_Y",
+        ] {
+            if let Some(s) = matches.value_of(opt) {
+                tmp.change_option(opt, s);
+            }
+        }
+        // Next we check all of the options that take multiple vals.
+        for opt in &["FONTS", "FT_COLOURS", "BG_COLOURS", "UL_COLOURS"] {
+            if let Some(strs) = matches.values_of(opt) {
+                tmp.replace_opt(opt, strs.map(|s| s.to_string()).collect());
+            }
+        }
+        // Return the final Config to be used.
+        Ok(tmp)
+    }
+
+    pub fn from_file(file: PathBuf) -> Config {
         let mut tmp = Config::default();
 
         // Read the config file to a string.
-        let conf_file = match read_to_string(file) {
+        let conf_file = match read_to_string(&file) {
             Ok(s) => s,
             Err(e) => {
                 // If we can't read it, let the user know but continue on with the default.
-                eprintln!("Could not read config file!\nFile: {}\nError: {}", file, e);
+                eprintln!(
+                    "Could not read config file!\nFile: {}\nError: {}",
+                    file.display(),
+                    e
+                );
                 return tmp;
             }
         };
@@ -114,14 +210,14 @@ impl Config {
             },
             "monitor" => self.monitor = val,
             "height" => {
-                if let Ok(s) = val.parse::<c_int>() {
+                if let Ok(s) = val.parse::<i32>() {
                     self.height = s;
                 } else {
                     eprintln!("Invaild size option! Needs to be a digit representable by a 32-bit integer.");
                 }
             }
             "underline_height" => {
-                if let Ok(s) = val.parse::<c_int>() {
+                if let Ok(s) = val.parse::<i32>() {
                     self.ul_height = s;
                 } else {
                     eprintln!("Invaild highlight_size option! Needs to be a digit representable by a 32-bit integer.");
@@ -129,7 +225,7 @@ impl Config {
             }
             "font" => self.fonts.push(val),
             "font_y" => {
-                if let Ok(y) = val.parse::<c_int>() {
+                if let Ok(y) = val.parse::<i32>() {
                     self.font_y = y;
                 } else {
                     eprintln!("Invaild font_y option! Needs to be a digit representable by a 32-bit integer.");

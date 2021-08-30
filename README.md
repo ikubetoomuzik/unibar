@@ -7,6 +7,11 @@ Simple Xorg display bar written for speed and ease of use.
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/ikubetoomuzik/unibar?color=%23ff79c6)
 ![GitHub commits since latest release (by date)](https://img.shields.io/github/commits-since/ikubetoomuzik/unibar/latest?color=ff79c6)
 
+## Issues in progress:
+* [ ] Add additional comentary to the bar.rs file for the Xlib stuff.
+* [ ] Potentially start a new library on top of the Xlib C bindings to make this easier for others.
+* [x] Add error handling and some basic error messages to the application.
+
 ## CLI Interface
 
 ### Required Arg

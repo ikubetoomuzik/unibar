@@ -2,26 +2,27 @@
 // By: Curtis Jones
 // Started on Ausust 06, 2020
 
-use unibar::*;
+use anyhow::Result;
+use unibar::{Bar, Config};
 
-fn main() {
+fn main() -> Result<()> {
     // Generate configuration from a file and any command line args.
-    let conf = gen_config();
+    let conf = Config::from_args()?;
 
     // Generate a new empty bar object.
-    let mut bar = Bar::new();
+    let mut bar = Bar::new()?;
 
-    // Alter the bar based on the config.
-    bar.load_config(conf);
+    // Apply the configuration loaded previously.
+    bar.load_config(conf)?;
 
     // Initialize the window and set any specific Atoms needed to get the bar displayed correctly.
-    bar.init();
+    bar.init()?;
 
     // Here is where the real work is done:
     //  -> checking for any exit signals that may have come in from the os.
     //  -> parsing any input on stdin to generate new text to display.
     //  -> deal with any XEvents like clicks or messages.
-    bar.event_loop();
+    bar.event_loop()?;
 
     // Because we are using C libraries alot of the objects we load need to be freed manually, so
     // we do that here before exiting with the code provided as arg.

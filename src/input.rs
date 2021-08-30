@@ -4,7 +4,8 @@
 //
 
 use super::init;
-use std::{collections::HashMap, mem, os::raw::*};
+use anyhow::Result;
+use std::collections::{hash_map::Entry, HashMap};
 use x11_dl::{xft, xlib, xrender::XGlyphInfo};
 
 /// Utility funtion so get the index of the first font that has a glyph for the provided char.
@@ -26,7 +27,7 @@ unsafe fn default_font_idx(
     fonts
         .iter()
         // Get the position of the first font with a glyph for chr.
-        .position(|&f| (xft.XftCharExists)(dpy, f, chr as c_uint) > 0)
+        .position(|&f| (xft.XftCharExists)(dpy, f, chr as u32) > 0)
         // If none are found then we default to 0.
         .unwrap_or(0)
 }
@@ -46,7 +47,7 @@ unsafe fn string_pixel_width(
     dpy: *mut xlib::Display,
     font: *mut xft::XftFont,
     string: &str,
-) -> c_uint {
+) -> u32 {
     // Rust gets mad if you don't initialize a variable before providing it as a function arg so we
     // lie to the rust compiler.
     let mut extents: XGlyphInfo = init!();
@@ -56,13 +57,13 @@ unsafe fn string_pixel_width(
     (xft.XftTextExtentsUtf8)(
         dpy,
         font,
-        string.as_bytes().as_ptr() as *mut c_uchar,
-        string.as_bytes().len() as c_int,
+        string.as_bytes().as_ptr() as *mut u8,
+        string.as_bytes().len() as i32,
         &mut extents,
     );
 
     // All that nice info and we just need the width.
-    extents.width as c_uint
+    extents.width as u32
 }
 
 /// Private struct to contain colour information for the status bar.
@@ -162,59 +163,60 @@ impl DisplayTemp {
         def: &HashMap<char, usize>,
         expl: &[DisplayTemp],
         text: &str,
-    ) -> Vec<DisplayTemp> {
-        expl.iter().fold(Vec::new(), |mut acc, dt| {
-            // usize::MAX is our key value to mean use default here.
-            if dt.idx == usize::MAX {
-                // Get the parts of the string within the DisplayTemp start and end.
-                let chunk: String = text.chars().take(dt.end).skip(dt.start).collect();
+    ) -> Result<Vec<DisplayTemp>> {
+        expl.iter()
+            .try_fold(Vec::new(), |mut acc, dt| -> Result<Vec<DisplayTemp>> {
+                // usize::MAX is our key value to mean use default here.
+                if dt.idx == usize::MAX {
+                    // Get the parts of the string within the DisplayTemp start and end.
+                    let chunk: String = text.chars().take(dt.end).skip(dt.start).collect();
 
-                // Temp value to use while counting.
-                let mut tmp = DisplayTemp::from(0, dt.start, dt.start);
+                    // Temp value to use while counting.
+                    let mut tmp = DisplayTemp::from(0, dt.start, dt.start);
 
-                // Generating the Vec of DisplayTemp values by folding over the chars.
-                let mut res = chunk.chars().fold(Vec::new(), |mut ac, ch| {
-                    // Get a copy of the default index for the char
-                    let ch_idx = *def.get(&ch).unwrap();
+                    // Generating the Vec of DisplayTemp values by folding over the chars.
+                    let mut res = chunk.chars().fold(Vec::new(), |mut ac, ch| {
+                        // Get a copy of the default index for the char
+                        let ch_idx = *def.get(&ch).expect("cant fail.");
 
-                    // If the default index is different from the tmp val index then we push our
-                    // tmp and start the new count.
-                    if ch_idx != tmp.idx {
-                        // We only do the push if we actually counted something. Otherwise just
-                        // start over by changing the font index.
-                        if tmp.start != tmp.end {
-                            ac.push(tmp);
-                            tmp.start = tmp.end;
-                            tmp.end = tmp.start + 1;
+                        // If the default index is different from the tmp val index then we push our
+                        // tmp and start the new count.
+                        if ch_idx != tmp.idx {
+                            // We only do the push if we actually counted something. Otherwise just
+                            // start over by changing the font index.
+                            if tmp.start != tmp.end {
+                                ac.push(tmp);
+                                tmp.start = tmp.end;
+                                tmp.end = tmp.start + 1;
+                            }
+                            tmp.idx = ch_idx;
+                        } else {
+                            // If the default is the same as the idx for our tmp val then we just increment
+                            // the end value.
+                            tmp.end += 1;
                         }
-                        tmp.idx = ch_idx;
-                    } else {
-                        // If the default is the same as the idx for our tmp val then we just increment
-                        // the end value.
-                        tmp.end += 1;
+
+                        // Gotta return something every loop.
+                        ac
+                    });
+
+                    // Once the loop is done we push the tmp value on the end if it counted and
+                    // characters.
+                    if tmp.start != tmp.end {
+                        res.push(tmp);
                     }
 
-                    // Gotta return something every loop.
-                    ac
-                });
-
-                // Once the loop is done we push the tmp value on the end if it counted and
-                // characters.
-                if tmp.start != tmp.end {
-                    res.push(tmp);
+                    // We use append here because it is possible to have generated multiple
+                    // DisplayTemps when using the default indexes.
+                    acc.append(&mut res);
+                } else {
+                    // If we are not using the defaults then we just push the value.
+                    acc.push(*dt);
                 }
 
-                // We use append here because it is possible to have generated multiple
-                // DisplayTemps when using the default indexes.
-                acc.append(&mut res);
-            } else {
-                // If we are not using the defaults then we just push the value.
-                acc.push(*dt);
-            }
-
-            // Once we pushed the old DisplayTemp or generated default ones we return our acc Vec.
-            acc
-        })
+                // Once we pushed the old DisplayTemp or generated default ones we return our acc Vec.
+                Ok(acc)
+            })
     }
 }
 
@@ -417,6 +419,13 @@ pub struct Input {
 }
 
 impl Input {
+    /// Helper to clear
+    pub fn clear(&mut self) {
+        self.text.clear();
+        self.text_display.clear();
+        self.backgrounds.clear();
+        self.underlines.clear();
+    }
     /// Small helper function to generate an emply Input.
     ///
     /// # Output
@@ -444,6 +453,7 @@ impl Input {
     /// * height:  -> Height of the bar.
     /// * hlt_hgt: -> Height of the underline highlights.
     ///
+    #[allow(clippy::too_many_arguments)]
     pub unsafe fn draw(
         &self,
         xft: &xft::Xft,
@@ -451,19 +461,19 @@ impl Input {
         draw: *mut xft::XftDraw,
         colours: &ColourPalette,
         fonts: &[*mut xft::XftFont],
-        start_x: c_int,
-        font_y: c_int,
-        height: c_uint,
-        hlt_hgt: c_uint,
+        start_x: i32,
+        font_y: i32,
+        height: u32,
+        hlt_hgt: u32,
     ) {
         // Displaying the backgrounds first.
         self.backgrounds.iter().for_each(|b| {
             (xft.XftDrawRect)(
                 draw,
                 &colours.background[b.idx],
-                start_x + b.start as c_int,
+                start_x + b.start as i32,
                 0,
-                (b.end - b.start) as c_uint,
+                (b.end - b.start) as u32,
                 height,
             );
         });
@@ -473,9 +483,9 @@ impl Input {
             (xft.XftDrawRect)(
                 draw,
                 &colours.underline[h.idx],
-                start_x + h.start as c_int,
-                (height - hlt_hgt) as c_int,
-                (h.end - h.start) as c_uint,
+                start_x + h.start as i32,
+                (height - hlt_hgt) as i32,
+                (h.end - h.start) as u32,
                 hlt_hgt,
             );
         });
@@ -489,10 +499,10 @@ impl Input {
                 fonts[td.face_idx],
                 start_x + acc,
                 font_y,
-                chunk.as_bytes().as_ptr() as *const c_uchar,
-                chunk.as_bytes().len() as c_int,
+                chunk.as_bytes().as_ptr() as *const u8,
+                chunk.as_bytes().len() as i32,
             );
-            acc + string_pixel_width(xft, dpy, fonts[td.face_idx], &chunk) as c_int
+            acc + string_pixel_width(xft, dpy, fonts[td.face_idx], &chunk) as i32
         });
     }
 
@@ -510,7 +520,7 @@ impl Input {
         xft: &xft::Xft,
         dpy: *mut xlib::Display,
         fonts: &[*mut xft::XftFont],
-    ) -> c_uint {
+    ) -> u32 {
         self.text_display.iter().fold(0, |acc, fd| {
             let chunk: String = self.text.chars().take(fd.end).skip(fd.start).collect();
             acc + string_pixel_width(xft, dpy, fonts[fd.face_idx], &chunk)
@@ -530,12 +540,17 @@ impl Input {
     /// # Output
     /// Input made based on the input String object.
     pub fn parse_string(
+        &mut self,
         xft: &xft::Xft,
         dpy: *mut xlib::Display,
         fonts: &[*mut xft::XftFont],
+        def_font_map: &mut HashMap<char, usize>,
         colours: &ColourPalette,
         input: &str,
-    ) -> Input {
+    ) -> Result<()> {
+        // clear self to start.
+        self.clear();
+
         // Loop vars.
         let mut in_format_block = false;
         let mut next_is_index = false;
@@ -548,7 +563,6 @@ impl Input {
         let mut underline_vec: Vec<DisplayTemp> = Vec::new();
         let mut font_colour_vec: Vec<DisplayTemp> = Vec::new();
         let mut font_face_vec: Vec<DisplayTemp> = Vec::new();
-        let mut def_font_map: HashMap<char, usize> = HashMap::new();
 
         // Temp vars.
         let mut count: usize = 0;
@@ -604,7 +618,7 @@ impl Input {
                         // start a new tmp count.
                         match index_type {
                             IndexType::BackgroundColour => {
-                                if d > (colours.background.len() - 1) as c_uint {
+                                if d > (colours.background.len() - 1) as u32 {
                                     eprintln!("Invalid background colour index -- TOO LARGE.");
                                 } else {
                                     bckgrnd_tmp.end = count;
@@ -613,7 +627,7 @@ impl Input {
                                 }
                             }
                             IndexType::HighlightColour => {
-                                if d > (colours.underline.len() - 1) as c_uint {
+                                if d > (colours.underline.len() - 1) as u32 {
                                     eprintln!("Invalid underline colour index -- TOO LARGE.");
                                 } else {
                                     underln_tmp.end = count;
@@ -622,7 +636,7 @@ impl Input {
                                 }
                             }
                             IndexType::FontColour => {
-                                if d > (colours.font.len() - 1) as c_uint {
+                                if d > (colours.font.len() - 1) as u32 {
                                     eprintln!("Invalid font colour index -- TOO LARGE.");
                                 } else {
                                     fcol_tmp.end = count;
@@ -631,7 +645,7 @@ impl Input {
                                 }
                             }
                             IndexType::FontFace => {
-                                if d > (fonts.len() - 1) as c_uint {
+                                if d > (fonts.len() - 1) as u32 {
                                     eprintln!("Invalid font face index -- TOO LARGE.");
                                 } else {
                                     fface_tmp.end = count;
@@ -677,10 +691,8 @@ impl Input {
                     _ => {
                         count += 1;
                         text.push(ch);
-                        if !def_font_map.contains_key(&ch) {
-                            unsafe {
-                                def_font_map.insert(ch, default_font_idx(xft, dpy, fonts, ch));
-                            }
+                        if let Entry::Vacant(v) = def_font_map.entry(ch) {
+                            v.insert(unsafe { default_font_idx(xft, dpy, fonts, ch) });
                         }
                     }
                 }
@@ -732,7 +744,7 @@ impl Input {
             .collect();
 
         // Fill in the default font faces.
-        let merg_fcs = DisplayTemp::default_font_faces(&def_font_map, &font_face_vec, &text);
+        let merg_fcs = DisplayTemp::default_font_faces(def_font_map, &font_face_vec, &text)?;
 
         // Gen the final FontDisplayInfo objects.
         let text_display = FontDisplayInfo::generate_list(&font_colour_vec, &merg_fcs);
@@ -748,11 +760,10 @@ impl Input {
         };
 
         // Return our valid string using the objects we generated previously.
-        Input {
-            text,
-            text_display,
-            backgrounds,
-            underlines,
-        }
+        self.text = text;
+        self.text_display = text_display;
+        self.underlines = underlines;
+        self.backgrounds = backgrounds;
+        Ok(())
     }
 }
