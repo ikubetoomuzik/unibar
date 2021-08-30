@@ -471,6 +471,7 @@ impl Bar {
                             }
                         }
                     }
+                    continue;
                 }
 
                 unsafe {
