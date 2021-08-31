@@ -9,10 +9,7 @@ use super::{
     optional::kill_me::KillMeModule,
 };
 use anyhow::Result;
-use clap::clap_app;
-use dirs::config_dir;
 use signal_hook::iterator::Signals;
-use std::path::PathBuf;
 use std::{collections::HashMap, ffi::CString, io, process, ptr, sync::mpsc, thread, time};
 use thiserror::Error;
 use x11_dl::{xft, xinerama, xlib, xrandr};
@@ -32,96 +29,6 @@ fn input_loop(stdin: io::Stdin, send: mpsc::Sender<String>) {
                 .expect("If this fails then the bar is already gone.");
         }
     }
-}
-
-/// Making a full Config by parsing the CLI arguments, parsing the config file, and mashing
-/// them together to create whatever.
-///
-/// # Output
-/// Main Config to be used for the Bar.
-pub fn gen_config() -> Config {
-    // Create an App object for parsing CLI args. Thankfully the library makes the code pretty
-    // readable and there is no runtime penalty.
-    let matches = clap_app!(Unibar =>
-        (version: env!("CARGO_PKG_VERSION"))
-        (author: "Curtis Jones <mail@curtisjones.ca>")
-        (about: "Simple Xorg display bar!")
-        (@arg NO_CONFIG:      -C --noconfig                   "Tells Unibar to skip loading a config file.")
-        (@arg CONFIG:         -c --config        +takes_value "Sets a custom config file")
-        (@arg NAME:           *                  +takes_value "Sets name and is required")
-        (@arg POSITION:       -p --position      +takes_value "overrides config file position option")
-        (@arg MONITOR:        -m --monitor       +takes_value "sets the monitor number to use. starts at 1")
-        (@arg DEF_BACKGROUND: -b --background    +takes_value "overrides config file default background")
-        (@arg HEIGHT:         -h --height        +takes_value "overrides config file bar height option")
-        (@arg UNDERLINE:      -u --underline     +takes_value "overrides config file underline height option")
-        (@arg FONT_Y:         -y --fonty         +takes_value "overrides config file font y offset option")
-        (@arg FONTS:          -f --fonts     ... +takes_value "overrides config file font options")
-        (@arg FT_COLOURS:     -F --ftcolours ... +takes_value "overrides config file font colours")
-        (@arg BG_COLOURS:     -B --bgcolours ... +takes_value "overrides config file background highlight colours")
-        (@arg UL_COLOURS:     -U --ulcolours ... +takes_value "overrides config file underline highlight colours")
-        (@arg KILL_ME_CMD:    -k --killme       +takes_value "enables my \"Kill Me\" module and sets the command to use")
-        )
-        .help_short("H") // We are using the lowercase h to set height.
-        .setting(clap::AppSettings::ColoredHelp) // Make it look pretty.
-        .get_matches(); // We actually only take the matches because we don't need clap for anything else.
-
-    // Get the name first. It's required.
-    let name = matches.value_of("NAME").unwrap();
-
-    // Decide what the default config file will be.
-    let default_conf = match config_dir() {
-        // We look in XDG_CONFIG_DIR or $HOME/.config for a unibar folder with unibar.conf
-        // avaiable.
-        Some(mut d) => {
-            let config = format!("unibar/{}.conf", name);
-            d.push(config);
-            String::from(d.to_str().unwrap())
-        }
-        // If neither of those dirs are a thing, then we just set an empty string.
-        None => String::new(),
-    };
-
-    // If a explicit config file was set in the CLI args then we use that instead of our
-    // default.
-    let conf_opt = matches.value_of("CONFIG").unwrap_or(&default_conf);
-
-    // Whatever we chose in the previous step we now try to load that config file.
-    // IF we are loading a config file then we use the value generated from bar name, if not we use
-    // the default Config.
-    let mut tmp = if matches.is_present("NO_CONFIG") {
-        Config::default()
-    } else {
-        Config::from_file(PathBuf::from(conf_opt))
-    };
-
-    // Set the name first as we got it earlier.
-    tmp.change_option("NAME", name);
-
-    // Now we alter the loaded Config object with the CLI args.
-    // First we check all of the options that only take one val.
-    for opt in &[
-        "MONITOR",
-        "POSITION",
-        "DEF_BACKGROUND",
-        "HEIGHT",
-        "UNDERLINE",
-        "FONT_Y",
-        "KILL_ME_CMD",
-    ] {
-        if let Some(s) = matches.value_of(opt) {
-            tmp.change_option(opt, s);
-        }
-    }
-
-    // Next we check all of the options that take multiple vals.
-    for opt in &["FONTS", "FT_COLOURS", "BG_COLOURS", "UL_COLOURS"] {
-        if let Some(strs) = matches.values_of(opt) {
-            tmp.replace_opt(opt, strs.map(|s| s.to_string()).collect());
-        }
-    }
-
-    // Return the final Config to be used.
-    tmp
 }
 
 #[derive(Debug, Error)]

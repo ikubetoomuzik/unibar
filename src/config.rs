@@ -11,8 +11,8 @@ use std::fs::read_to_string;
 use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
-#[error("Could not generate config.")]
-pub struct Error;
+#[error("[{0}] is not a valid option!")]
+pub struct Error(String);
 
 #[derive(Debug)]
 pub struct Config {
@@ -73,6 +73,7 @@ impl Config {
         (@arg FT_COLOURS:     -F --ftcolours ... +takes_value "overrides config file font colours")
         (@arg BG_COLOURS:     -B --bgcolours ... +takes_value "overrides config file background highlight colours")
         (@arg UL_COLOURS:     -U --ulcolours ... +takes_value "overrides config file underline highlight colours")
+        (@arg KILL_ME_CMD:    -k --killme        +takes_value "Enabled kill_me module and set the command to use.")
         )
         .help_short("H") // We are using the lowercase h to set height.
         .setting(clap::AppSettings::ColoredHelp) // Make it look pretty.
@@ -105,10 +106,10 @@ impl Config {
         let mut tmp = if matches.is_present("NO_CONFIG") {
             Config::default()
         } else {
-            Config::from_file(conf_opt)
+            Config::from_file(conf_opt)?
         };
         // Set the name first as we got it earlier.
-        tmp.change_option("NAME", name);
+        tmp.change_option("NAME", name)?;
         // Now we alter the loaded Config object with the CLI args.
         // First we check all of the options that only take one val.
         for opt in &[
@@ -118,37 +119,27 @@ impl Config {
             "HEIGHT",
             "UNDERLINE",
             "FONT_Y",
+            "KILL_ME_CMD",
         ] {
             if let Some(s) = matches.value_of(opt) {
-                tmp.change_option(opt, s);
+                tmp.change_option(opt, s)?;
             }
         }
         // Next we check all of the options that take multiple vals.
         for opt in &["FONTS", "FT_COLOURS", "BG_COLOURS", "UL_COLOURS"] {
             if let Some(strs) = matches.values_of(opt) {
-                tmp.replace_opt(opt, strs.map(|s| s.to_string()).collect());
+                tmp.replace_opt(opt, strs.map(|s| s.to_string()).collect())?;
             }
         }
         // Return the final Config to be used.
         Ok(tmp)
     }
 
-    pub fn from_file(file: PathBuf) -> Config {
+    pub fn from_file(file: PathBuf) -> Result<Config> {
         let mut tmp = Config::default();
 
         // Read the config file to a string.
-        let conf_file = match read_to_string(&file) {
-            Ok(s) => s,
-            Err(e) => {
-                // If we can't read it, let the user know but continue on with the default.
-                eprintln!(
-                    "Could not read config file!\nFile: {}\nError: {}",
-                    file.display(),
-                    e
-                );
-                return tmp;
-            }
-        };
+        let conf_file = read_to_string(&file)?;
 
         for (i, line) in (1..).zip(conf_file.lines()) {
             // line to allow comments
@@ -170,7 +161,7 @@ impl Config {
                     continue;
                 }
             };
-            tmp.change_option(opt, val);
+            tmp.change_option(opt, val)?;
         }
 
         // Clear out the defaults if anything else was set.
@@ -188,10 +179,10 @@ impl Config {
         }
 
         // Return our temp variable.
-        tmp
+        Ok(tmp)
     }
 
-    pub fn change_option(&mut self, opt: &str, val: &str) {
+    pub fn change_option(&mut self, opt: &str, val: &str) -> std::result::Result<(), Error> {
         // Doing a lot of direct comparisons so we gotta trim and set the values to lowercase.
         // Also grabbing just string slices because it makes the rest of the code look pretty.
         let opt = &opt.trim().to_lowercase()[..];
@@ -236,18 +227,20 @@ impl Config {
             "background_colour" => self.bg_clrs.push(val),
             "highlight_colour" => self.ul_clrs.push(val),
             "kill_me_cmd" => self.kill_me_cmd = Some(val),
-            _ => eprintln!("Invalid option -> {}", opt),
+            _ => return Err(Error(opt.into())),
         }
+        Ok(())
     }
 
-    pub fn replace_opt(&mut self, opt: &str, vals: Vec<String>) {
+    pub fn replace_opt(&mut self, opt: &str, vals: Vec<String>) -> std::result::Result<(), Error> {
         let opt = &opt.trim().to_lowercase()[..];
         match opt {
             "fonts" => self.fonts = vals,
             "ft_colours" => self.ft_clrs = vals,
             "bg_colours" => self.bg_clrs = vals,
             "ul_colours" => self.ul_clrs = vals,
-            _ => eprintln!("Invalid option."),
+            _ => return Err(Error(opt.into())),
         }
+        Ok(())
     }
 }
