@@ -20,6 +20,7 @@ pub struct Config {
     pub top: bool,                   // top or bottom
     pub monitor: String,             // xinerama montior list index for monitor
     pub height: i32,                 // width or height of bar depending on pos.
+    pub width: Option<i32>,          // width or height of bar depending on pos.
     pub ul_height: i32,              // width or height of bar depending on pos.
     pub fonts: Vec<String>,          // Vec of strings listing the fonts in FcLookup form.
     pub font_y: i32,                 // pixel offset from the top of bar to bottom font.
@@ -37,6 +38,7 @@ impl Config {
             top: true,
             monitor: String::new(),
             height: 32,
+            width: None,
             ul_height: 4,
             fonts: vec![String::from("mono:size=12")],
             font_y: 20,
@@ -67,6 +69,7 @@ impl Config {
         (@arg MONITOR:        -m --monitor       +takes_value "sets the monitor number to use. starts at 1")
         (@arg DEF_BACKGROUND: -b --background    +takes_value "overrides config file default background")
         (@arg HEIGHT:         -h --height        +takes_value "overrides config file bar height option")
+        (@arg WIDTH:          -w --width         +takes_value "overrides config file bar width option")
         (@arg UNDERLINE:      -u --underline     +takes_value "overrides config file underline height option")
         (@arg FONT_Y:         -y --fonty         +takes_value "overrides config file font y offset option")
         (@arg FONTS:          -f --fonts     ... +takes_value "overrides config file font options")
@@ -117,6 +120,7 @@ impl Config {
             "POSITION",
             "DEF_BACKGROUND",
             "HEIGHT",
+            "WIDTH",
             "UNDERLINE",
             "FONT_Y",
             "KILL_ME_CMD",
@@ -200,6 +204,13 @@ impl Config {
                 _ => eprintln!("Invaild position option!"),
             },
             "monitor" => self.monitor = val,
+            "width" => {
+                if let Ok(s) = val.parse::<i32>() {
+                    self.width = Some(s);
+                } else {
+                    eprintln!("Invaild size option! Needs to be a digit representable by a 32-bit integer.");
+                }
+            }
             "height" => {
                 if let Ok(s) = val.parse::<i32>() {
                     self.height = s;

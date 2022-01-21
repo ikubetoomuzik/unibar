@@ -14,7 +14,7 @@
 /// It is very much not in the rust theme but that's the price you pay for using c libraries.
 macro_rules! init {
     () => {
-        std::mem::MaybeUninit::uninit().assume_init();
+        std::mem::MaybeUninit::uninit().assume_init()
     };
 }
 

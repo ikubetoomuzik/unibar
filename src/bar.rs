@@ -289,6 +289,9 @@ impl Bar {
                 eprintln!("XRandr not available, using full XDisplay!");
             }
 
+            if let Some(width) = conf.width {
+                self.width = width;
+            }
             self.underline_height = conf.ul_height;
             self.fonts = conf.fonts.iter().try_fold(
                 Vec::new(),
