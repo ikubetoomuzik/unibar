@@ -4,13 +4,15 @@
 
 use super::{
     config::Config,
-    init,
     input::{ColourPalette, Input},
     optional::kill_me::KillMeModule,
 };
 use anyhow::Result;
 use signal_hook::iterator::Signals;
-use std::{collections::HashMap, ffi::CString, io, process, ptr, sync::mpsc, thread, time};
+use std::{
+    collections::HashMap, ffi::CString, io, mem::MaybeUninit, process, ptr, sync::mpsc, thread,
+    time,
+};
 use thiserror::Error;
 use x11_dl::{xft, xinerama, xlib, xrandr};
 
@@ -55,7 +57,7 @@ pub struct Bar {
     visual: *mut xlib::Visual,
     root: u64,
     window_id: u64,
-    event: xlib::XEvent,
+    event: MaybeUninit<xlib::XEvent>,
     draw: *mut xft::XftDraw,
     font_map: HashMap<char, usize>,
     fonts: Vec<*mut xft::XftFont>,
@@ -105,8 +107,8 @@ impl Bar {
                 visual,
                 root,
                 window_id: 0,
-                event: init!(),
-                draw: init!(),
+                event: MaybeUninit::uninit(),
+                draw: ptr::null_mut(),
                 font_map: HashMap::new(),
                 fonts: Vec::new(),
                 font_y: 0,
@@ -331,12 +333,14 @@ impl Bar {
     pub fn init(&mut self) -> Result<()> {
         unsafe {
             // Manually set the attributes here so we can get more fine grain control.
-            let mut attributes: xlib::XSetWindowAttributes = init!();
-            attributes.background_pixel = self.back_colour;
-            attributes.colormap = self.cmap;
-            attributes.override_redirect = xlib::False;
-            attributes.event_mask =
+            let mut attributes: MaybeUninit<xlib::XSetWindowAttributes> = MaybeUninit::uninit();
+            let atts = attributes.as_mut_ptr();
+            (*atts).background_pixel = self.back_colour;
+            (*atts).colormap = self.cmap;
+            (*atts).override_redirect = xlib::False;
+            (*atts).event_mask =
                 xlib::ExposureMask | xlib::ButtonPressMask | xlib::VisibilityChangeMask;
+            let mut attributes = attributes.assume_init();
 
             // Use the attributes we created to make a window.
             self.window_id = (self.xlib.XCreateWindow)(
@@ -481,7 +485,7 @@ impl Bar {
                 // Check events.
                 if self.poll_events() {
                     #[allow(clippy::single_match)]
-                    match self.event.type_ {
+                    match self.event.assume_init_ref().get_type() {
                         // if the bar is show on the screen we draw content.
                         xlib::Expose => self.draw_display(),
                         // ignore all other events
@@ -582,22 +586,25 @@ impl Bar {
 
     unsafe fn get_xft_colour(&self, name: &str) -> Result<xft::XftColor> {
         let name = CString::new(name)?;
-        let mut tmp: xft::XftColor = init!();
+
+        let mut tmp: MaybeUninit<xft::XftColor> = MaybeUninit::uninit();
         (self.xft.XftColorAllocName)(
             self.display,
             self.visual,
             self.cmap,
             name.as_ptr() as *const i8,
-            &mut tmp,
+            tmp.as_mut_ptr(),
         );
+        let tmp = tmp.assume_init();
         Ok(tmp)
     }
 
     unsafe fn get_xlib_color(&self, name: &str) -> Result<u64> {
         let name = CString::new(name)?;
-        let mut temp: xlib::XColor = init!();
-        (self.xlib.XParseColor)(self.display, self.cmap, name.as_ptr(), &mut temp);
-        (self.xlib.XAllocColor)(self.display, self.cmap, &mut temp);
+        let mut temp: MaybeUninit<xlib::XColor> = MaybeUninit::uninit();
+        (self.xlib.XParseColor)(self.display, self.cmap, name.as_ptr(), temp.as_mut_ptr());
+        (self.xlib.XAllocColor)(self.display, self.cmap, temp.as_mut_ptr());
+        let temp = temp.assume_init();
         Ok(temp.pixel)
     }
 
@@ -606,7 +613,7 @@ impl Bar {
             self.display,
             self.window_id,
             xlib::ButtonPressMask | xlib::ExposureMask,
-            &mut self.event,
+            self.event.as_mut_ptr(),
         ) == 1
     }
 
@@ -626,8 +633,9 @@ impl Bar {
         let hn_buffer: *mut i8 = vec![0i8; hn_size].as_mut_ptr();
         libc::gethostname(hn_buffer, hn_size);
         let mut hn_list = [hn_buffer];
-        let mut hn_text_prop: xlib::XTextProperty = init!();
-        (self.xlib.XStringListToTextProperty)(hn_list.as_mut_ptr(), 1, &mut hn_text_prop);
+        let mut hn_text_prop: std::mem::MaybeUninit<xlib::XTextProperty> = MaybeUninit::uninit();
+        (self.xlib.XStringListToTextProperty)(hn_list.as_mut_ptr(), 1, hn_text_prop.as_mut_ptr());
+        let mut hn_text_prop = hn_text_prop.assume_init();
         (self.xlib.XSetWMClientMachine)(self.display, self.window_id, &mut hn_text_prop);
         // Set _NET_WM_PID
         let pid = [process::id()].as_ptr();

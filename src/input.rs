@@ -3,9 +3,11 @@
 // Started on: September 07, 2020
 //
 
-use super::init;
 use anyhow::Result;
-use std::collections::{hash_map::Entry, HashMap};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    mem::MaybeUninit,
+};
 use x11_dl::{xft, xlib, xrender::XGlyphInfo};
 
 /// Utility funtion so get the index of the first font that has a glyph for the provided char.
@@ -50,7 +52,8 @@ unsafe fn string_pixel_width(
 ) -> u32 {
     // Rust gets mad if you don't initialize a variable before providing it as a function arg so we
     // lie to the rust compiler.
-    let mut extents: XGlyphInfo = init!();
+    let mut extents: MaybeUninit<XGlyphInfo> = MaybeUninit::uninit();
+    // let mut extents: XGlyphInfo = init!();
 
     // Getting just so much info about the glyphs to be printed for the string arg when using the
     // font provided.
@@ -59,8 +62,11 @@ unsafe fn string_pixel_width(
         font,
         string.as_bytes().as_ptr() as *mut u8,
         string.as_bytes().len() as i32,
-        &mut extents,
+        // &mut extents,
+        extents.as_mut_ptr(),
     );
+
+    let extents = extents.assume_init();
 
     // All that nice info and we just need the width.
     extents.width as u32
